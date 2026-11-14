@@ -1,0 +1,16 @@
+[Unit]
+Description=Tower of Babel Central Hub (FastAPI)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tower-of-babel/server
+EnvironmentFile=/etc/tower-of-babel/hub.env
+ExecStart=/opt/tower-of-babel/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 --workers 1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
