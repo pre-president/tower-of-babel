@@ -1,4 +1,4 @@
-# AGENTS.md — 巴别塔（Babel Tower）多 AI 协作总约定
+# AGENTS.md — 巴别塔（Tower of Babel）多 AI 协作总约定
 
 本文件面向参与开发或使用本项目的执行节点（**Gemini / Antigravity IDE**、**DeepSeek / Claude Code**、**GPT / Codex**）。
 

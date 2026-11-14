@@ -1,9 +1,9 @@
-# 巴别塔 · Babel Tower (Personal Multi-Agent Collaboration Hub)
+# 巴别塔 · Tower of Babel (Personal Multi-Agent Collaboration Hub)
 
 > **中国海洋大学大气科学 郑江羽 个人开源开发项目**  
 > **Personal Open-Source Project by Zheng Jiangyu (Atmospheric Sciences, Ocean University of China)**
 
-**巴别塔（Babel Tower）** 是一个轻量级、模型无关的个人多 AI 协同工作平台：以 **ChatGPT Chat** 为最高规划与决策中枢，以 **阿里云轻量中枢（FastAPI + PostgreSQL + MCP Server）** 为共享记忆与任务状态总线，让 **Gemini（Antigravity IDE）**、**DeepSeek（Claude Code）** 与 **GPT（Codex）** 共享同一套上下文、协同开发并无缝交接任务。
+**巴别塔（Tower of Babel）** 是一个轻量级、模型无关的个人多 AI 协同工作平台：以 **ChatGPT Chat** 为最高规划与决策中枢，以 **阿里云轻量中枢（FastAPI + PostgreSQL + MCP Server）** 为共享记忆与任务状态总线，让 **Gemini（Antigravity IDE）**、**DeepSeek（Claude Code）** 与 **GPT（Codex）** 共享同一套上下文、协同开发并无缝交接任务。
 
 ---
 

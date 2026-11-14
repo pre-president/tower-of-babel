@@ -1,12 +1,12 @@
 # 安全规范与开源管理准则 (Security Policy)
 
-本项目（**巴别塔 / Babel Tower**）由 **中国海洋大学大气科学 郑江羽** 维护并计划开源至 GitHub。为确保个人数据、云端服务器与第三方 AI 账号安全，所有贡献者与 AI 执行节点必须严格遵守以下规则：
+本项目（**巴别塔 / Tower of Babel**）由 **中国海洋大学大气科学 郑江羽** 维护并计划开源至 GitHub。为确保个人数据、云端服务器与第三方 AI 账号安全，所有贡献者与 AI 执行节点必须严格遵守以下规则：
 
 ## 1. 严禁入库的敏感信息
 以下命令与内容**绝对禁止**出现在任何已跟踪文件、文档示例、Commit 历史或测试夹具中：
 - 阿里云 RAM AccessKey / Secret、ECS SSH 私钥、服务器密码。
 - DeepSeek / OpenAI / Anthropic / Google 等模型服务商 API Key。
-- Babel Tower 中枢签发的 `Bridge Token` 与各 `Agent Token`。
+- Tower of Babel 中枢签发的 `Bridge Token` 与各 `Agent Token`。
 - 个人 ChatGPT 账号 Cookie、Session Token 或原始私人对话数据导出包。
 - 生产环境 `.env`、数据库备份（`.sql` / `.dump`）及本地 `.jsonl` 会话日志。
 

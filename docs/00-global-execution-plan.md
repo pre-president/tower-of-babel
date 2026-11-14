@@ -1,4 +1,4 @@
-# 00 · 巴别塔（Babel Tower）全局执行总规划
+# 00 · 巴别塔（Tower of Babel）全局执行总规划
 
 > **归档日期**：2026-11-14  
 > **维护者**：中国海洋大学大气科学 郑江羽  
@@ -15,7 +15,7 @@
 
 1. **绝不干扰现有波导服务**：新中枢独占 `127.0.0.1:8100`、独占独立 `postgresql` 数据目录/数据库、独占 `python3.11` 虚拟环境与 `hub.atmosphericduct.xyz` 配置，绝不改动 `/opt/atmosphericduct` 或系统默认 Python 3.6。
 2. **先本地全量单测，再部署阿里云**：每个阶段的代码先在本机用 `pytest` / mock 验证逻辑、权限越权、状态机、去重与交接流程全部通过后，再同步部署到阿里云并做端到端冒烟验证。
-3. **绝对保密与可开源结构**：从第一行代码起坚持“密钥与代码彻底分离”，所有真实 Token、API Key、数据库连接串只存于服务器 `/etc/babel-tower/hub.env`（`chmod 600`）与本机未入库 `.env`，仓库只留 `.env.example`。
+3. **绝对保密与可开源结构**：从第一行代码起坚持“密钥与代码彻底分离”，所有真实 Token、API Key、数据库连接串只存于服务器 `/etc/tower-of-babel/hub.env`（`chmod 600`）与本机未入库 `.env`，仓库只留 `.env.example`。
 4. **每阶段一个可独立验收的里程碑**：不贪大求全，上一阶段端到端打通并验证通过后，再开启下一阶段。
 
 ---
@@ -26,7 +26,7 @@
 **目标**：在阿里云搭起稳健的“大脑与账本”，通过 API 完成全部读写与权限隔离验证。
 1. **服务器基础设施安装与低内存调优**（阿里云）：
    - 安装 `postgresql-server`（13.23）、`postgresql-contrib`（含 `pg_trgm`）、`python3.11`、`python3.11-devel`。
-   - 初始化 PostgreSQL 并调优参数（`shared_buffers=128MB`、`work_mem=4MB`、`max_connections=25`），创建专用数据库 `babel_hub` 与最小权限用户。
+   - 初始化 PostgreSQL 并调优参数（`shared_buffers=128MB`、`work_mem=4MB`、`max_connections=25`），创建专用数据库 `tower_hub` 与最小权限用户。
    - 启用每日凌晨自动 `pg_dump` 压缩备份（保留最近 14 天，含一键恢复演练脚本）。
 2. **核心代码实现**（本地 `server/`）：
    - Alembic 数据库迁移脚本（覆盖 `planner_threads`、`dialogue_messages`、`thread_digests`、`decisions`、`execution_tasks`、`task_checkpoints`、`questions`、`artifacts`、`audit_logs`）。
@@ -37,7 +37,7 @@
      - 任务租约行锁（`SELECT FOR UPDATE` 防并发抢单）；
      - 状态机强校验（显式区分 `BLOCKED_QUOTA` 与租约超时）。
 3. **部署与 Stage 1 验收门禁**：
-   - 将 `/etc/nginx/conf.d/hub.atmosphericduct.conf` 切换为反代 `127.0.0.1:8100`，配好 `babel-hub.service`（开机自启）。
+   - 将 `/etc/nginx/conf.d/hub.atmosphericduct.conf` 切换为反代 `127.0.0.1:8100`，配好 `tower-hub.service`（开机自启）。
    - 验证：`https://hub.atmosphericduct.xyz/health` 返回 DB 连通正常；`atmosphericduct.xyz` 未受任何影响；`pytest` 全部通过（含 403 越权测试、决策换代测试、重复同步幂等测试）。
 
 ---
