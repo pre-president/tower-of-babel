@@ -22,23 +22,19 @@
 
 ## 二、分阶段详细执行路线图
 
-### Stage 1（Phase 1）：中央数据库与 FastAPI 核心骨架
+### Stage 1（Phase 1）：中央数据库与 FastAPI 核心骨架 — **✅ 已完成并验收上线（2026-11-14）**
 **目标**：在阿里云搭起稳健的“大脑与账本”，通过 API 完成全部读写与权限隔离验证。
 1. **服务器基础设施安装与低内存调优**（阿里云）：
-   - 安装 `postgresql-server`（13.23）、`postgresql-contrib`（含 `pg_trgm`）、`python3.11`、`python3.11-devel`。
-   - 初始化 PostgreSQL 并调优参数（`shared_buffers=128MB`、`work_mem=4MB`、`max_connections=25`），创建专用数据库 `tower_hub` 与最小权限用户。
-   - 启用每日凌晨自动 `pg_dump` 压缩备份（保留最近 14 天，含一键恢复演练脚本）。
+   - 已安装 `postgresql-server`（13.23）、`postgresql-contrib`（含 `pg_trgm`）、`python3.11`、`python3.11-devel`。
+   - 已初始化 PostgreSQL 并调优参数（`shared_buffers=128MB`、`work_mem=4MB`、`max_connections=25`），创建专用数据库 `tower_hub` 与最小权限用户。
+   - 已启用每日凌晨自动 `pg_dump` 压缩备份（保留最近 14 天）并完成首次导出校验。
 2. **核心代码实现**（本地 `server/`）：
    - Alembic 数据库迁移脚本（覆盖 `planner_threads`、`dialogue_messages`、`thread_digests`、`decisions`、`execution_tasks`、`task_checkpoints`、`questions`、`artifacts`、`audit_logs`）。
-   - 双域鉴权中间件（`Bridge Token` vs 3 个独立 `Agent Token`），通过服务端单元测试硬性验证：**Agent 绝不能批准决策、绝不能删除档案**。
-   - 实现核心服务逻辑：
-     - 幂等消息入库（`message_hash` 去重 + PostgreSQL `tsvector`/`pg_trgm` 全文检索）；
-     - 决策版本迭代（批准新版 `APPROVED` 自动将旧版流转为 `SUPERSEDED`）；
-     - 任务租约行锁（`SELECT FOR UPDATE` 防并发抢单）；
-     - 状态机强校验（显式区分 `BLOCKED_QUOTA` 与租约超时）。
-3. **部署与 Stage 1 验收门禁**：
-   - 将 `/etc/nginx/conf.d/hub.atmosphericduct.conf` 切换为反代 `127.0.0.1:8100`，配好 `tower-hub.service`（开机自启）。
-   - 验证：`https://hub.atmosphericduct.xyz/health` 返回 DB 连通正常；`atmosphericduct.xyz` 未受任何影响；`pytest` 全部通过（含 403 越权测试、决策换代测试、重复同步幂等测试）。
+   - 双域鉴权中间件（`Bridge Token` vs 独立 `Agent Token`），通过服务端单元测试硬性验证：**Agent 绝不能批准决策、绝不能删除档案**。
+   - 实现核心服务逻辑：幂等消息入库、全文检索、决策版本换代、任务租约行锁、状态机强校验与交接包组装。
+3. **部署与 Stage 1 验收门禁（全部实测通过）**：
+   - `/etc/nginx/conf.d/hub.atmosphericduct.conf` 已反代至 `127.0.0.1:8100`，`tower-hub.service` 已启动并自启；
+   - `https://hub.atmosphericduct.xyz/health` 返回 DB 连通正常，`401`/`403` 权限拦截正常，`atmosphericduct.xyz` 未受任何影响，`pytest` 6/6 全绿通过。
 
 ---
 
@@ -51,10 +47,11 @@
      - **`get_handoff_package(task_id)`**：按“ChatGPT 最新 ~5 轮 + 当前有效 `APPROVED` 决策 + 上一模型执行现场最新 ~10 轮原文 + 交接摘要 + `git diff` 补丁”组装返回；
      - **`get_checkpoint_trace(task_id, offset, limit)`**：按需分页追查更早执行记录；
      - 历史对话返回一律包裹不可信只读标记（防 Prompt 注入）。
-2. **本机桥接与 `.jsonl` 交接提取器**（`client-bridge/`）：
-   - **本地 `.jsonl` 解析器**：分别适配 Claude Code（`~/.claude/projects/`）、Codex（`~/.codex/sessions/`）、Antigravity（`~/.gemini/antigravity/brain/`），自动剔除冗长工具 JSON 噪点，精确提取最近 ~10 轮用户与助手可见文字对话。
+2. **本机桥接与 `.jsonl` 交接提取器**（`client-bridge/`，采用可插拔设计以便开源泛化）：
+   - **可插拔 `.jsonl` 适配器注册表（`TranscriptAdapter`）**：首批内置 Claude Code（`~/.claude/projects/`）、Codex（`~/.codex/sessions/`）、Antigravity（`~/.gemini/antigravity/brain/`），后续社区仅需新增轻量适配器即可接入 Cursor/Windsurf/Cline 等工具；自动剔除底层工具 JSON 噪点，精确提取最近 ~10 轮用户与助手可见文字对话。
+   - **可扩展 Agent Token 配置**：后端鉴权顺手支持通用 `TOWER_AGENT_TOKENS` 映射（并向下兼容三端独立环境变量），不锁死仅 3 个节点名。
    - **`handoff-cli.py`**：支持主动交接或额度耗尽中断后一键运行——抓取当前工作区 `git branch`、`git commit`、`git diff` 补丁与 `.jsonl` 最近 ~10 轮，生成结构化交接包上传至 Hub。
-   - **`mcp-stdio-proxy.py`**：若三端中任一客户端暂不直接支持远程 Bearer HTTP MCP，可通过该极简本地脚本转发，确保三端接口 100% 一致。
+   - **`mcp-stdio-proxy.py`**：若三端中任一客户端暂不直接支持远程 Bearer HTTP MCP，可通过该极简本地脚本转发，确保接口 100% 一致。
 3. **Stage 2 验收门禁**：
    - 先用模拟数据 + 本地客户端实测完整跑通：**在 Antigravity 用 `CHAT_AR_MAIN` 开工 → 修改本地测试文件 → 触发交接 → 在 Claude Code / Codex 里认领并拿到最近 ~10 轮现场与补丁继续完成**。
 
@@ -84,6 +81,7 @@
 
 ---
 
-### Stage 5（总验收与 GitHub 开源脱敏发布）
+### Stage 5（总验收与 GitHub 开源完善）
 1. 执行全链路 14 项验收（多窗口隔离、决策换代、三端切换、额度耗尽模拟、服务器重启自启、数据库 `pg_dump` 恢复演练）。
-2. 运行自动化脱敏检查脚本（确认零密钥、零私密日志、`.env.example` 完整、文档与 `AGENTS.md` 齐备），正式推送 GitHub 公开仓库。
+2. 为开源社区补齐低门槛试用包（可选 `Dockerfile` / `docker-compose.yml` + SQLite 零配置快速启动模式），同时保留生产轻量原生方案。
+3. 运行自动化脱敏检查脚本（确认零密钥、零私密日志、`.env.example` 完整、文档与 `AGENTS.md` 齐备），更新 GitHub 仓库最终发布版。
