@@ -1,0 +1,51 @@
+# === Secrets & Environment ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+credentials/
+*token*.json
+*secret*
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# === Node / Extension Build ===
+node_modules/
+extension/dist/
+*.zip
+*.crx
+
+# === Databases & Local Logs ===
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl
+*.log
+logs/
+backups/
+data/
+
+# === Local Agent Workspaces & OS ===
+.claude/
+.codex/
+.gemini/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
