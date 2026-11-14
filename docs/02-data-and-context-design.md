@@ -40,14 +40,16 @@
 - `summarizer_model`（如 `deepseek-chat` / 经 Claude Code 触发）
 - `created_at`
 
-### 1.4 `decisions`（Decision Archive：追加式不可覆盖决策档案）
+### 1.4 `decisions`（Decision Archive：追加式版本换代决策档案）
+**正式决策支持按版本更新换代（`APPROVED` → `SUPERSEDED`），但不允许原地静默擦除历史**：
 - `decision_id`、`project_id`、`planner_thread_id`
 - `title`、`decision_content`（正式结论）
 - `rationale`（理由与证据）
 - `rejected_alternatives`（明确否决的备选方案，防止后续模型走回头路）
 - `source_message_ids`（追溯到具体哪几轮 ChatGPT 对话）
-- `status`：`PROPOSED`（执行节点提议）| `APPROVED`（仅用户/Chat Bridge 批准）| `SUPERSEDED`（被新版本替代）| `REJECTED`
-- `supersedes_decision_id`（指向被替代的旧决策 ID，**历史版本永久保留**）
+- `status`：`PROPOSED`（执行节点提议新决策或修订草案）| `APPROVED`（当前生效的正式决策，仅用户/Chat Bridge 批准）| `SUPERSEDED`（已被更新版本取代的历史正式决策）| `REJECTED`
+- `supersedes_decision_id`（指向被替代的旧 `APPROVED` 决策 ID；当新版本获批为 `APPROVED` 时，服务端在同事务内自动将旧版本标为 `SUPERSEDED` 并保留完整演化链）
+- `decision_version`（版本号递增，方便执行 AI 感知规范是否发生迭代）
 - `approved_by`、`created_at`、`updated_at`
 
 ### 1.5 `execution_tasks` & `task_checkpoints`（Execution Archive：执行档案与租约）
@@ -111,17 +113,18 @@ WAITING_FOR_DECISION     BLOCKED_QUOTA          HANDOFF_PENDING
 针对“一个窗口聊到上百轮、几十万字”的场景，设计以下**严格分层**的读取策略，兼顾不丢脉络与节省额度：
 
 ### 第一层：按“任务场景”精确配比默认读取量
-1. **场景 A：新任务首次启动（ChatGPT 规划完毕 → 交给执行 AI）**
-   - 返回：**全部 `APPROVED` 决策** + **来源 `planner_thread_id` 的历史阶段纪要（如有）** + **最近 `15–20` 轮 ChatGPT 原文** + 任务描述与本地路径指针。
+1. **场景 A：新任务首次启动（用户输入 Chat 窗口名/标题即可直接开工）**
+   - 交互方式：用户在 Gemini / DeepSeek / Codex 中直接给出 Chat 名字或标题（例如“按 `CHAT_AR_MAIN` 开始干……”，或引用窗口标题），MCP 自动模糊/精确解析出对应 `planner_thread_id` 并拉取上下文、直接建单并领取执行。
+   - 返回：**当前有效 `APPROVED` 决策（自动过滤已 `SUPERSEDED` 的旧版，同时提示最近刚替代了哪条旧决策）** + **来源 `planner_thread_id` 的历史阶段纪要（如有）** + **最近 `15–20` 轮 ChatGPT 原文** + 任务描述与本地路径指针。
    - 原因：新开工需要完整理解你与 ChatGPT 敲定的研究背景与边界。
 2. **场景 B：模型间交接（例如 GPT 额度耗尽 / 主动切换 → DeepSeek 或 Gemini 接手）**
-   - 返回：**全部 `APPROVED` 决策** + **ChatGPT 最新 `5` 轮左右原文**（锚定最新规划口径，避免被几百轮旧聊天淹没）+ **重点注入上一模型的交接包**。
+   - 返回：**当前有效 `APPROVED` 决策** + **ChatGPT 最新 `5` 轮左右原文**（锚定最新规划口径，避免被几百轮旧聊天淹没）+ **重点注入上一模型的执行现场**。
    - **避免“一口气读过长日志”的分层交接包结构**：
-     - **必读层（默认直接返回，控制在 ~3K–6K 字以内）**：
+     - **必读层（默认直接返回，控制在合理字数内）**：
        1. 上一模型交接摘要（`execution_digest`：做了什么、改了哪些文件、测试结果、卡在哪、下一步第一件事）；
-       2. 最新 `3–5` 轮执行节点与你的关键对话结论（来自本地 `.jsonl` 提炼）；
+       2. **上一模型执行现场的最新 `~10` 轮原文**（从其本机 `.jsonl` 提取的用户指令与模型可见文字输出，自动剔除底层工具原始 JSON 噪点）；
        3. `git_branch`、`git_commit` 与 `git_diff` 摘要。
-     - **按需展开层（不默认塞进上下文）**：完整本地执行记录按分段游标存放或留在本机 `.jsonl`，接手模型只有觉得缺细节时才通过 `get_checkpoint_trace(offset, limit)` 或本机路径按需追读。
+     - **按需展开层（不默认塞进上下文）**：超过最近 10 轮的更早执行日志按分段游标存放或留在本机 `.jsonl`，接手模型只有觉得缺细节时才通过 `get_checkpoint_trace(offset, limit)` 或本机路径按需追读。
 
 ### 第二层：零额外额度的全文检索（Search）
 - 执行 AI 或 ChatGPT 侧边栏随时可通过 `search_conversations(query, project_id, planner_thread_id, limit=8)`，借助 PostgreSQL 全文索引毫秒级召回几十轮前某次具体讨论（比如某个公式、参数设定、报错原因）的**原始精确片段**。

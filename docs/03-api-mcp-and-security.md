@@ -25,13 +25,15 @@
 
 ## 2. MCP Server 接口清单（面向 Gemini / DeepSeek / Codex）
 
-### 2.1 上下文与检索
-- `get_project_context(project_id, planner_thread_id)`：返回项目概览、`APPROVED` 决策、最新阶段摘要、活跃任务。
-- `get_task_context(task_id)`：新任务启动首选——返回该任务要求 + `APPROVED` 决策 + 对应窗口最近 `15–20` 轮 ChatGPT 原文。
+### 2.1 上下文与检索（支持直接通过 Chat 名称/标题开工）
+- `resolve_chat_thread(chat_ref)`：支持传入 `planner_thread_id` 或 Chat 窗口标题/别名，解析出唯一规划窗口身份。
+- `start_work_from_chat(chat_ref, task_title, task_goal, session_id, local_repo_path?, git_branch?)`：**零摩擦开工首选**——一步完成“按 Chat 名定位窗口 → 返回当前有效 `APPROVED` 决策 + 阶段摘要 + 最近 15–20 轮 Chat 原文 → 创建并领取 `EXECUTING` 任务”。
+- `get_project_context(project_id?, chat_ref?)`：返回项目概览、当前有效 `APPROVED` 决策、最新阶段摘要、活跃任务。
+- `get_task_context(task_id)`：针对已有任务返回任务要求 + 当前有效 `APPROVED` 决策 + 对应窗口最近 `15–20` 轮 ChatGPT 原文。
 - `search_conversations(query, project_id?, planner_thread_id?, limit=8)`：PostgreSQL 全文搜索返回命中片段。
 - `get_conversation(planner_thread_id, start_turn, end_turn)`：按轮次精确调阅历史原文。
 - `get_recent_discussions(planner_thread_id, limit=10)`：获取指定窗口最新 N 轮原文。
-- `get_decisions(project_id, status="APPROVED")`：拉取决策列表。
+- `get_decisions(project_id, active_only=True)`：默认仅返回当前有效 `APPROVED` 决策（并注明最近被替代的旧版 ID，防止沿用过时规则）；传 `active_only=False` 可回溯完整迭代史。
 - `get_execution_status(project_id)`：查看项目下所有任务状态与当前谁持有租约。
 - `list_artifacts(task_id)`：查看本地文件指针与补丁清单。
 
@@ -44,15 +46,16 @@
 - `update_task_status(task_id, status, summary)`（受状态机白名单校验，不允许非法跳变）
 
 ### 2.3 模型间交接（Context Relay）
-- `handoff_task(task_id, reason, execution_digest, next_steps, git_commit?, git_diff_patch?, trace_excerpt?)`：保存完整现场、释放租约、置为 `HANDOFF_PENDING` 或 `BLOCKED_QUOTA`。
+- `handoff_task(task_id, reason, execution_digest, next_steps, recent_turns_json?, git_commit?, git_diff_patch?, trace_excerpt?)`：保存完整现场、释放租约、置为 `HANDOFF_PENDING` 或 `BLOCKED_QUOTA`。
 - `claim_handoff(task_id, session_id)`：新模型认领交接任务，置为 `HANDED_OFF`。
-- `get_handoff_package(task_id)`：**专用于交接**——返回 `APPROVED` 决策 + ChatGPT 最新 `5` 轮原文 + 上一模型的 `execution_digest` / `trace_excerpt` / `git_diff_patch` / 本地路径指针。
+- `get_handoff_package(task_id)`：**专用于交接**——返回当前有效 `APPROVED` 决策 + ChatGPT 最新 `5` 轮原文 + 上一模型执行现场的最新 `~10` 轮原文与 `execution_digest` / `git_diff_patch` / 本地路径指针。
+- `get_checkpoint_trace(task_id, offset=0, limit=20)`：按需分页查阅更早的执行现场记录。
 - `confirm_handoff(task_id, workspace_verified_note)`：接手模型核对完本机 Git 分支与补丁后确认接手，状态转为 `RESUMED`（继续执行）。
 
-### 2.4 问题提交与决策查询
+### 2.4 问题提交与决策建议/换代查询
 - `submit_question(task_id, planner_thread_id, question_text, evidence_context, impact_note)`：挂起阻塞问题，任务状态可切为 `WAITING_FOR_DECISION`。
 - `get_pending_questions(planner_thread_id?)` / `get_question_status(question_id)` / `get_decision(decision_id)`
-- `propose_decision(project_id, planner_thread_id, title, decision_content, rationale, rejected_alternatives?)`：只允许生成 `PROPOSED` 状态，需等 ChatGPT / 用户批准。
+- `propose_decision(project_id, planner_thread_id, title, decision_content, rationale, rejected_alternatives?, supersedes_decision_id?)`：只允许生成 `PROPOSED` 状态（新建或建议更新替换旧决策），需等 ChatGPT / 用户批准生效。
 
 ### 2.5 文件指针与（Phase 3）OSS 接口
 - `register_artifact(task_id, path_or_uri, sha256, kind, pinned=false)`：Phase 1–2 用于登记本机文件指针。

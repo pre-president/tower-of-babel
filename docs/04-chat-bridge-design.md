@@ -4,6 +4,16 @@
 
 ---
 
+## 0. 安装与“无需上架应用商店”的本地加载机制
+
+本扩展基于 **Chrome Manifest V3（`sidePanel` 侧边栏 API）** 开发，**无需发布或提交到 Chrome 网上应用店审核**即可直接永久自用：
+1. 在 Chrome 地址栏打开 `chrome://extensions/`；
+2. 打开右上角 **「开发者模式（Developer mode）」**；
+3. 点击左上角 **「加载已解压的扩展程序（Load unpacked）」**，选择本地 `巴别塔\extension\` 目录即可立即启用右侧边栏与网页注入；
+4. 后续每次更新扩展代码，只需点一下扩展卡片上的刷新图标即可秒级生效（未来开源后其他用户也是同样方式加载）。
+
+---
+
 ## 1. 核心原则：白名单驱动，不干扰日常闲聊
 
 - **未绑定窗口**：你平时新开的查资料、写邮件、日常闲聊窗口，**默认完全不抓取、不上传、不弹窗打扰**。
@@ -41,9 +51,12 @@
 
 ### 4.1 上下文读取注入
 在侧边栏提供一键操作按钮（结果先在侧边栏预览可剪裁，点击“填入输入框”后由你确认发送）：
-- **Load Project Context**：拉取项目最新 `APPROVED` 决策与当前任务进展。
+- **Load Project Context**：拉取项目最新有效 `APPROVED` 决策与当前任务进展。
 - **Search Dialogue**：输入关键词检索全部相关工作窗口的历史片段并引用到当前对话。
-- **Review Proposed Decisions**：查看执行 AI 提交的待审批决策建议，点击“批准”正式写入 `Decision Archive`。
+- **Manage Decisions（批准 / 更新换代）**：
+  - 对话中产生新结论时，一键登记并 `Approve Decision`；
+  - 当方案需要迭代升级时，点击已有 `APPROVED` 决策旁的 **「更新换代（Supersede）」**，提交新版本内容与变更原因，系统自动将旧版本转为 `SUPERSEDED`、新版本生效为 `APPROVED`；
+  - 审核执行 AI 提交的 `PROPOSED` 修改建议，一键决定采纳或驳回。
 
 ### 4.2 问题队列 & 白名单可选自动发送
 当 DeepSeek / Gemini / Codex 调用 `submit_question` 向某个 `planner_thread_id` 提问后：
