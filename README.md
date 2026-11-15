@@ -132,10 +132,12 @@ curl http://127.0.0.1:8100/health
    python -m tower_bridge.handoff_cli doctor --repo .
    python -m tower_bridge.compact_cli doctor
    python -m tower_bridge.compact_cli candidates
+   # Windows 静默电源自适应自动压缩（插电 10 分钟 / 电池 30 分钟一轮）：
+   powershell -ExecutionPolicy Bypass -File .\install_autocompact.ps1 -AcMinutes 10 -BatteryMinutes 30
    ```
-2. **Chrome Chat Bridge 扩展（本地开发者模式）**：
-   - 在 Chrome 地址栏打开 `chrome://extensions/` → 开启右上角「开发者模式」→ 点击「加载已解压的扩展程序」→ 选择仓库中的 `extension/` 目录；
-   - 打开扩展侧边栏「连接设置」，填入 Hub 地址（例如 `https://hub.atmosphericduct.xyz`）与 `TOWER_BRIDGE_TOKEN` 并点击保存与测试连通性。
+2. **Chrome Chat Bridge 扩展（本地开发者模式，v0.3.1）**：
+   - 在 Chrome 地址栏打开 `chrome://extensions/` → 开启右上角「开发者模式」→ 点击「加载已解压的扩展程序」→ 选择仓库中的 `extension/` 目录（更新文件后点击卡片上的 `↻` 重新加载）；
+   - 打开扩展侧边栏 **「工作台与设置」**，填入 Hub 地址（例如 `https://hub.atmosphericduct.xyz`）与 `TOWER_BRIDGE_TOKEN` 并点击保存与测试；切到任意 ChatGPT 普通对话或 Projects 项目对话（`/g/g-p-.../c/...`）即可一键绑定与管理。
 
 ---
 

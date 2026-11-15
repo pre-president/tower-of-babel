@@ -65,6 +65,29 @@ async function syncOrQueueBatch(batch) {
   }
 }
 
+async function sendToTabWithInject(tabId, tabUrl, msg) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, msg);
+  } catch {
+    if (!tabUrl || !tabUrl.startsWith("https://chatgpt.com")) {
+      return null;
+    }
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: [
+          "src/shared/history-tree.js",
+          "src/content/dom-adapter.js",
+          "src/content/content-script.js",
+        ],
+      });
+      return await chrome.tabs.sendMessage(tabId, msg);
+    } catch {
+      return null;
+    }
+  }
+}
+
 async function checkAndAutoSendForOpenTabs() {
   const st = await getState();
   if (st.globalKillSwitch || !st.settings.bridgeToken) return;
@@ -78,12 +101,8 @@ async function checkAndAutoSendForOpenTabs() {
     const binding = st.bindings[convId];
     if (!binding || !binding.sync_enabled || !binding.auto_send_enabled) continue;
 
-    let pageInfo;
-    try {
-      pageInfo = await chrome.tabs.sendMessage(tab.id, { type: "TOWER_GET_PAGE_INFO" });
-    } catch {
-      continue;
-    }
+    const pageInfo = await sendToTabWithInject(tab.id, tab.url, { type: "TOWER_GET_PAGE_INFO" });
+    if (!pageInfo) continue;
 
     let inbox;
     try {
@@ -110,22 +129,18 @@ async function checkAndAutoSendForOpenTabs() {
     if (!check.allowed) continue;
 
     const text = Guard.formatQuestionForChat(nextQ);
-    try {
-      const fillResp = await chrome.tabs.sendMessage(tab.id, {
-        type: "TOWER_FILL_COMPOSER",
-        text,
-        autoSend: true,
-      });
-      if (fillResp && fillResp.ok) {
-        await Api.markQuestionInChat(st.settings, nextQ.question_id, binding.planner_thread_id);
-        st.guardByThread[binding.planner_thread_id] = Guard.recordAutoSend(
-          threadGuard,
-          nextQ.question_id
-        );
-        await chrome.storage.local.set({ [STORAGE_KEYS.guardState]: st.guardByThread });
-      }
-    } catch {
-      // Never blindly retry inside same tick on failure
+    const fillResp = await sendToTabWithInject(tab.id, tab.url, {
+      type: "TOWER_FILL_COMPOSER",
+      text,
+      autoSend: true,
+    });
+    if (fillResp && fillResp.ok) {
+      await Api.markQuestionInChat(st.settings, nextQ.question_id, binding.planner_thread_id);
+      st.guardByThread[binding.planner_thread_id] = Guard.recordAutoSend(
+        threadGuard,
+        nextQ.question_id
+      );
+      await chrome.storage.local.set({ [STORAGE_KEYS.guardState]: st.guardByThread });
     }
   }
 }
@@ -201,7 +216,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.tabs.query({ url: ["https://chatgpt.com/*"] }).then(async (tabs) => {
       for (const tab of tabs) {
         if (tab.id) {
-          chrome.tabs.sendMessage(tab.id, { type: "TOWER_BINDING_UPDATED" }).catch(() => {});
+          sendToTabWithInject(tab.id, tab.url, { type: "TOWER_BINDING_UPDATED" }).catch(() => {});
         }
       }
       sendResponse({ ok: true });

@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const Dom = require("../src/content/dom-adapter.js");
@@ -8,6 +11,7 @@ const Tree = require("../src/shared/history-tree.js");
 const Guard = require("../src/shared/auto-send-guard.js");
 const RetryQ = require("../src/shared/retry-queue.js");
 const Api = require("../src/shared/api-client.js");
+const Helpers = require("../src/shared/thread-helpers.js");
 
 function makeNode({ nodeType = 1, tagName = "DIV", attrs = {}, textContent = "", childNodes = [] }) {
   return {
@@ -211,4 +215,57 @@ test("Retry queue deduplicates and flushes in chronological order", async () => 
 test("API client exposes compaction candidates and thread digest helpers", () => {
   assert.equal(typeof Api.getCompactionCandidates, "function");
   assert.equal(typeof Api.listDigests, "function");
+});
+
+test("ThreadHelpers parses ChatGPT Project and standard conversation URLs", () => {
+  const projUrl =
+    "https://chatgpt.com/g/g-p-6ad802679d748191b0f1a532ffbd38f5-da-qi-he-yan-jiu/c/6af862ba-048c-83e8-b11f-b80d1e370d10";
+  assert.equal(Helpers.parseConversationIdFromUrl(projUrl), "6af862ba-048c-83e8-b11f-b80d1e370d10");
+  assert.deepEqual(Helpers.parseProjectSlugFromUrl(projUrl), {
+    rawGroupKey: "g-p-6ad802679d748191b0f1a532ffbd38f5",
+    slug: "da-qi-he-yan-jiu",
+  });
+
+  const stdUrl = "https://chatgpt.com/c/12345678-1234-1234-1234-1234567890ab";
+  assert.equal(Helpers.parseConversationIdFromUrl(stdUrl), "12345678-1234-1234-1234-1234567890ab");
+  assert.equal(Helpers.parseProjectSlugFromUrl(stdUrl), null);
+
+  assert.equal(Helpers.parseConversationIdFromUrl("https://chatgpt.com/"), null);
+  assert.equal(Helpers.parseConversationIdFromUrl("https://example.com/c/12345678-1234"), null);
+});
+
+test("ThreadHelpers cleans titles, builds deterministic IDs, and formats start prompts", () => {
+  assert.equal(Helpers.cleanChatTitle("第十二次组会 - ChatGPT"), "第十二次组会");
+  assert.equal(Helpers.cleanChatTitle("AR Research | ChatGPT"), "AR Research");
+
+  const idCn = Helpers.buildAutoThreadId("第十二次组会", "6af862ba-048c-83e8-b11f-b80d1e370d10");
+  assert.equal(idCn, "CHAT_6AF862BA");
+  assert.match(idCn, /^[A-Za-z0-9_-]{2,64}$/);
+
+  const idEn = Helpers.buildAutoThreadId("AR Main Line", "6af862ba-048c-83e8-b11f-b80d1e370d10");
+  assert.equal(idEn, "CHAT_AR_MAIN_LINE_6AF862BA");
+  assert.match(idEn, /^[A-Za-z0-9_-]{2,64}$/);
+
+  const prompt = Helpers.buildStartPrompt({ title: "第十二次组会", planner_thread_id: idCn });
+  assert.ok(prompt.includes("第十二次组会"));
+  assert.ok(prompt.includes(idCn));
+});
+
+test("Sidepanel JS element IDs all exist in sidepanel.html", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const html = fs.readFileSync(path.join(here, "../src/sidepanel/sidepanel.html"), "utf8");
+  const js = fs.readFileSync(path.join(here, "../src/sidepanel/sidepanel.js"), "utf8");
+
+  const htmlIds = new Set();
+  for (const m of html.matchAll(/\bid=["']([^"']+)["']/g)) {
+    htmlIds.add(m[1]);
+  }
+
+  const missing = [];
+  for (const m of js.matchAll(/\$\(\s*["']([A-Za-z0-9_-]+)["']\s*\)/g)) {
+    if (!htmlIds.has(m[1])) {
+      missing.push(m[1]);
+    }
+  }
+  assert.deepEqual(missing, []);
 });

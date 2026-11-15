@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -14,7 +16,12 @@ if str(_BRIDGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_BRIDGE_ROOT))
 
 from tower_bridge.config import BridgeConfig, HubClient, HubHttpError  # noqa: E402
+from tower_bridge.power import detect_power_source, interval_for_power_source  # noqa: E402
 from tower_bridge.summarizer import SummarizerConfig, SummarizerError, summarize_batch  # noqa: E402
+
+
+def _default_tower_dir() -> Path:
+    return Path.home() / ".tower-of-babel"
 
 
 def _make_client(agent: str | None = None) -> HubClient:
@@ -137,11 +144,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except HubHttpError as exc:
         health_status = f"ERROR: {exc}"
 
+    state_file = _default_tower_dir() / "compact_state.json"
     out = {
         "hub_url": client.config.hub_url,
         "hub_token_configured": bool(client.config.token),
         "hub_health": health_status,
         "summarizer": summarizer.status_dict(),
+        "power_source": detect_power_source(),
+        "scheduler_state": _load_state(state_file),
     }
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -151,6 +161,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"Hub Health : {out['hub_health']}")
         print(f"Summarizer : protocol={s['protocol']} | model={s['model']} | key={'configured' if s['api_key_configured'] else 'MISSING'}")
         print(f"Endpoint   : {s['endpoint']} (source={s['source']})")
+        print(f"Power Mode : {out['power_source']} (AC=10m / Battery=30m)")
+        if out["scheduler_state"]:
+            st = out["scheduler_state"]
+            print(f"Last Tick  : {st.get('last_check_iso', '-')} | {st.get('last_result_summary', '-')}")
     return 0
 
 
@@ -253,43 +267,230 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 1 if has_err else 0
 
 
+def _compact_all_ready(
+    client: HubClient,
+    summarizer: SummarizerConfig,
+    *,
+    protect_turns: int = 20,
+    threshold_chars: int = 150_000,
+    max_batch_chars: int = 250_000,
+    max_batches: int = 5,
+    force: bool = False,
+    dry_run: bool = False,
+) -> tuple[int, list[dict[str, Any]]]:
+    rows, _ = client.request_json(
+        "GET",
+        "/api/v1/bridge/compaction/candidates",
+        query={
+            "protect_recent_turns": protect_turns,
+            "threshold_chars": threshold_chars,
+        },
+    )
+    candidates = rows or []
+    targets = [
+        r["planner_thread_id"]
+        for r in candidates
+        if force or r.get("should_compact")
+    ]
+    results: list[dict[str, Any]] = []
+    for tid in targets:
+        try:
+            res = compact_thread(
+                client,
+                summarizer,
+                planner_thread_id=tid,
+                protect_turns=protect_turns,
+                threshold_chars=threshold_chars,
+                max_batch_chars=max_batch_chars,
+                max_batches=max_batches,
+                force=force,
+                dry_run=dry_run,
+            )
+            results.extend(res)
+        except (HubHttpError, SummarizerError) as exc:
+            results.append({"planner_thread_id": tid, "status": "error", "error": str(exc)})
+    return len(candidates), results
+
+
+def _load_state(state_file: Path) -> dict[str, Any]:
+    if not state_file.is_file():
+        return {}
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_state(state_file: Path, data: dict[str, Any]) -> None:
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = state_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(state_file)
+
+
+def _acquire_lock(lock_file: Path, stale_seconds: int = 900) -> bool:
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    if lock_file.exists():
+        try:
+            age = now - lock_file.stat().st_mtime
+            if age > stale_seconds:
+                lock_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+    try:
+        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"pid={os.getpid()} ts={int(now)}\n")
+        return True
+    except FileExistsError:
+        return False
+
+
+def _append_log(log_file: Path, line: str) -> None:
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        if log_file.is_file() and log_file.stat().st_size > 256_000:
+            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            log_file.write_text("\n".join(lines[-300:]) + "\n", encoding="utf-8")
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with log_file.open("a", encoding="utf-8") as fh:
+            fh.write(f"[{stamp}] {line}\n")
+    except OSError:
+        pass
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     client = _make_client(None)
     summarizer = SummarizerConfig.discover()
     cycles = 0
     while True:
         cycles += 1
+        power_src = detect_power_source()
         try:
-            rows, _ = client.request_json(
-                "GET",
-                "/api/v1/bridge/compaction/candidates",
-                query={
-                    "protect_recent_turns": args.protect_turns,
-                    "threshold_chars": args.threshold_chars,
-                },
+            _, res = _compact_all_ready(
+                client,
+                summarizer,
+                protect_turns=args.protect_turns,
+                threshold_chars=args.threshold_chars,
+                max_batch_chars=args.max_batch_chars,
+                max_batches=args.max_batches,
+                force=False,
+                dry_run=args.dry_run,
             )
-            ready = [r["planner_thread_id"] for r in (rows or []) if r.get("should_compact")]
-            for tid in ready:
-                res = compact_thread(
-                    client,
-                    summarizer,
-                    planner_thread_id=tid,
-                    protect_turns=args.protect_turns,
-                    threshold_chars=args.threshold_chars,
-                    max_batch_chars=args.max_batch_chars,
-                    max_batches=args.max_batches,
-                    force=False,
-                    dry_run=args.dry_run,
-                )
-                for item in res:
-                    print(json.dumps(item, ensure_ascii=False))
+            for item in res:
+                print(json.dumps(item, ensure_ascii=False))
         except (HubHttpError, SummarizerError) as exc:
             print(f"[watch] cycle {cycles} warning: {exc}", file=sys.stderr)
 
         if args.iterations > 0 and cycles >= args.iterations:
             break
-        time.sleep(max(1, args.interval))
+        sleep_s = (
+            max(1, args.interval)
+            if args.interval and args.interval > 0
+            else interval_for_power_source(
+                power_src,
+                ac_minutes=args.ac_minutes,
+                battery_minutes=args.battery_minutes,
+            )
+        )
+        time.sleep(sleep_s)
     return 0
+
+
+def cmd_tick(args: argparse.Namespace) -> int:
+    base_dir = _default_tower_dir()
+    state_file = Path(args.state_file) if args.state_file else base_dir / "compact_state.json"
+    lock_file = Path(args.lock_file) if args.lock_file else base_dir / "compact.lock"
+    log_file = Path(args.log_file) if args.log_file else base_dir / "compact.log"
+
+    power_src = args.power_override or detect_power_source()
+    target_interval = interval_for_power_source(
+        power_src, ac_minutes=args.ac_minutes, battery_minutes=args.battery_minutes
+    )
+    # 45s tolerance so a 10-min Windows Scheduled Task cadence hits every 10m on AC & 30m on battery
+    min_wait = max(0, target_interval - 45)
+    now = time.time()
+    prev = _load_state(state_file)
+    last_check_ts = float(prev.get("last_check_ts") or 0.0)
+
+    if not args.force_check and last_check_ts > 0 and (now - last_check_ts) < min_wait:
+        remaining = int(min_wait - (now - last_check_ts))
+        out = {
+            "status": f"throttled_{power_src}",
+            "power_source": power_src,
+            "target_interval_seconds": target_interval,
+            "next_check_in_seconds": remaining,
+        }
+        if args.json:
+            print(json.dumps(out, ensure_ascii=False))
+        return 0
+
+    if not _acquire_lock(lock_file):
+        out = {"status": "locked", "power_source": power_src}
+        if args.json:
+            print(json.dumps(out, ensure_ascii=False))
+        return 0
+
+    try:
+        client = _make_client(None)
+        summarizer = SummarizerConfig.discover()
+        cand_count, results = _compact_all_ready(
+            client,
+            summarizer,
+            protect_turns=args.protect_turns,
+            threshold_chars=args.threshold_chars,
+            max_batch_chars=args.max_batch_chars,
+            max_batches=args.max_batches,
+            force=False,
+            dry_run=args.dry_run,
+        )
+        compacted_cnt = sum(1 for r in results if r.get("status") == "compacted")
+        err_cnt = sum(1 for r in results if r.get("status") == "error")
+        summary = f"power={power_src} candidates={cand_count} compacted={compacted_cnt} errors={err_cnt}"
+        _append_log(log_file, summary)
+        new_state = {
+            **prev,
+            "last_power_source": power_src,
+            "last_check_ts": now,
+            "last_check_iso": datetime.datetime.now().isoformat(timespec="seconds"),
+            "ac_minutes": args.ac_minutes,
+            "battery_minutes": args.battery_minutes,
+            "last_candidates_count": cand_count,
+            "last_result_summary": summary,
+            "last_results": results,
+        }
+        if compacted_cnt > 0:
+            new_state["last_compact_ts"] = now
+            new_state["last_compact_iso"] = new_state["last_check_iso"]
+        _save_state(state_file, new_state)
+        out = {"status": "checked", "power_source": power_src, "candidates": cand_count, "results": results}
+        if args.json:
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            print(summary)
+        return 1 if err_cnt > 0 else 0
+    except (HubHttpError, SummarizerError) as exc:
+        err_msg = f"power={power_src} error={exc}"
+        _append_log(log_file, err_msg)
+        _save_state(
+            state_file,
+            {
+                **prev,
+                "last_power_source": power_src,
+                "last_check_ts": now,
+                "last_check_iso": datetime.datetime.now().isoformat(timespec="seconds"),
+                "last_result_summary": err_msg,
+            },
+        )
+        if args.json:
+            print(json.dumps({"status": "error", "power_source": power_src, "error": str(exc)}, ensure_ascii=False))
+        else:
+            print(err_msg, file=sys.stderr)
+        return 1
+    finally:
+        lock_file.unlink(missing_ok=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -323,8 +524,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--json", action="store_true")
     p_run.set_defaults(func=cmd_run)
 
-    p_watch = sub.add_parser("watch", help="Poll compaction candidates continuously on local machine")
-    p_watch.add_argument("--interval", type=int, default=300, help="Polling interval in seconds")
+    p_watch = sub.add_parser("watch", help="Poll compaction candidates continuously (power-aware by default)")
+    p_watch.add_argument("--interval", type=int, default=0, help="Fixed interval in seconds (0 = auto AC/battery)")
+    p_watch.add_argument("--ac-minutes", type=int, default=10, help="Polling minutes when on AC power")
+    p_watch.add_argument("--battery-minutes", type=int, default=30, help="Polling minutes when on battery")
     p_watch.add_argument("--iterations", type=int, default=0, help="Stop after N cycles (0 = forever)")
     p_watch.add_argument("--protect-turns", type=int, default=20)
     p_watch.add_argument("--threshold-chars", type=int, default=150_000)
@@ -332,6 +535,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_watch.add_argument("--max-batches", type=int, default=5)
     p_watch.add_argument("--dry-run", action="store_true")
     p_watch.set_defaults(func=cmd_watch)
+
+    p_tick = sub.add_parser("tick", help="Power-aware single check/compaction tick for OS schedulers")
+    p_tick.add_argument("--ac-minutes", type=int, default=10, help="Check interval when plugged in (minutes)")
+    p_tick.add_argument("--battery-minutes", type=int, default=30, help="Check interval on battery (minutes)")
+    p_tick.add_argument("--protect-turns", type=int, default=20)
+    p_tick.add_argument("--threshold-chars", type=int, default=150_000)
+    p_tick.add_argument("--max-batch-chars", type=int, default=250_000)
+    p_tick.add_argument("--max-batches", type=int, default=5)
+    p_tick.add_argument("--force-check", action="store_true", help="Bypass interval throttle for this tick")
+    p_tick.add_argument("--power-override", choices=["ac", "battery"], default=None)
+    p_tick.add_argument("--state-file", default=None)
+    p_tick.add_argument("--lock-file", default=None)
+    p_tick.add_argument("--log-file", default=None)
+    p_tick.add_argument("--dry-run", action="store_true")
+    p_tick.add_argument("--json", action="store_true")
+    p_tick.set_defaults(func=cmd_tick)
 
     return parser
 

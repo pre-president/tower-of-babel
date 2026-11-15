@@ -317,3 +317,84 @@ def test_compact_cli_anthropic_and_openai_e2e(
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_power_aware_tick_cadence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import time
+
+    state = _StubState()
+    srv = _start_stub_server(state)
+    base = f"http://127.0.0.1:{srv.server_port}"
+    state_file = tmp_path / "compact_state.json"
+    lock_file = tmp_path / "compact.lock"
+    log_file = tmp_path / "compact.log"
+    try:
+        monkeypatch.setenv("TOWER_HUB_URL", base)
+        monkeypatch.setenv("TOWER_TOKEN", "stub-bridge-token")
+        monkeypatch.setenv("TOWER_SUMMARIZER_PROTOCOL", "anthropic")
+        monkeypatch.setenv("TOWER_SUMMARIZER_BASE_URL", f"{base}/zen/go")
+        monkeypatch.setenv("TOWER_SUMMARIZER_API_KEY", "stub-anth-key")
+
+        # Seed state 15 minutes ago -> runs cleanly on AC (10m) if checked under AC,
+        # OR throttles cleanly on battery (30m)!
+        fifteen_min_ago = time.time() - 900
+        state_file.write_text(json.dumps({"last_check_ts": fifteen_min_ago}), encoding="utf-8")
+
+        assert (
+            compact_cli.main(
+                [
+                    "tick",
+                    "--ac-minutes",
+                    "10",
+                    "--battery-minutes",
+                    "30",
+                    "--power-override",
+                    "battery",
+                    "--state-file",
+                    str(state_file),
+                    "--lock-file",
+                    str(lock_file),
+                    "--log-file",
+                    str(log_file),
+                    "--json",
+                ]
+            )
+            == 0
+        )
+        bat_out = json.loads(capsys.readouterr().out)
+        assert bat_out["status"] == "throttled_battery"
+        assert len(state.saved_digests) == 0
+
+        # Same 15-min timestamp under AC power -> interval (10m) elapsed -> runs & compacts!
+        assert (
+            compact_cli.main(
+                [
+                    "tick",
+                    "--ac-minutes",
+                    "10",
+                    "--battery-minutes",
+                    "30",
+                    "--power-override",
+                    "ac",
+                    "--state-file",
+                    str(state_file),
+                    "--lock-file",
+                    str(lock_file),
+                    "--log-file",
+                    str(log_file),
+                    "--json",
+                ]
+            )
+            == 0
+        )
+        ac_out = json.loads(capsys.readouterr().out)
+        assert ac_out["status"] == "checked"
+        assert len(state.saved_digests) == 1
+        assert not lock_file.exists()
+        assert state_file.is_file()
+        assert log_file.is_file()
+    finally:
+        srv.shutdown()
+        srv.server_close()

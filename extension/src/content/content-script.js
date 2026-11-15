@@ -3,6 +3,11 @@
  * Strict whitelist rule: unbound windows are completely ignored with zero DOM observation.
  */
 (() => {
+  if (globalThis.__TOWER_CONTENT_SCRIPT_READY__) {
+    return;
+  }
+  globalThis.__TOWER_CONTENT_SCRIPT_READY__ = true;
+
   const Dom = globalThis.TowerDomAdapter;
   const Tree = globalThis.TowerHistoryTree;
 

@@ -3,175 +3,306 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>巴别塔 · Chat Bridge</title>
+  <title>巴别塔 · Tower of Babel</title>
   <link rel="stylesheet" href="sidepanel.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand-row">
-      <div>
-        <h1>巴别塔 · Tower of Babel</h1>
-        <span id="hubStatus" class="badge badge-muted">未连接</span>
+    <div class="topbar-inner">
+      <div class="brand-cluster">
+        <div class="brand-mark" aria-hidden="true">塔</div>
+        <div class="brand-text">
+          <h1>巴别塔</h1>
+          <button id="hubStatusBtn" type="button" class="status-pill status-muted" title="查看连接设置">
+            <span class="dot"></span>
+            <span id="hubStatusText">检测中…</span>
+          </button>
+        </div>
       </div>
-      <label class="kill-switch" title="立即暂停所有窗口自动发送">
-        <input type="checkbox" id="globalKillSwitch" />
-        <span>急停自动发送</span>
-      </label>
+
+      <div class="top-actions">
+        <button id="btnRefreshTab" type="button" class="btn-icon" title="刷新当前标签页状态">↻</button>
+        <label class="kill-pill" id="killSwitchWrap" title="全局暂停所有窗口自动发送">
+          <input type="checkbox" id="globalKillSwitch" />
+          <span id="killSwitchLabel">急停</span>
+        </label>
+      </div>
     </div>
-    <div id="activeTabBanner" class="tab-banner">请打开 chatgpt.com 对话标签页</div>
+
+    <div class="tab-shell">
+      <nav class="tabs" role="tablist">
+        <button class="tab active" type="button" data-tab="workspace">
+          当前窗口 <span id="inboxBadge" class="tab-badge hidden">0</span>
+        </button>
+        <button class="tab" type="button" data-tab="decisions">决策与检索</button>
+        <button class="tab" type="button" data-tab="hub">工作台与设置</button>
+      </nav>
+    </div>
   </header>
 
-  <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="window">窗口绑定</button>
-    <button class="tab" data-tab="inbox">问题队列 <span id="inboxCount" class="pill">0</span></button>
-    <button class="tab" data-tab="decisions">上下文与决策</button>
-    <button class="tab" data-tab="settings">连接设置</button>
-  </nav>
-
   <main>
-    <!-- Tab 1: Current Window Binding & Sync -->
-    <section id="tab-window" class="panel active">
-      <div class="card">
-        <div class="row-between">
-          <h2>当前 ChatGPT 窗口</h2>
-          <button id="btnRefreshTab" class="btn btn-sm">刷新检测</button>
+    <!-- Setup Reminder Banner (hidden once Bridge Token is set) -->
+    <div id="tokenReminder" class="notice-card notice-warn hidden">
+      <div class="row-between">
+        <div>
+          <strong>尚未配置 Bridge Token</strong>
+          <p class="meta">填入一次本机 Token 即可开始同步与管理决策</p>
         </div>
-        <p class="meta">会话 UUID：<code id="convIdText">-</code></p>
-        <p class="meta">白名单状态：<strong id="whitelistStateText">未绑定（零抓取）</strong></p>
+        <button id="btnGoSettings" type="button" class="btn btn-sm btn-primary">去填写</button>
+      </div>
+    </div>
 
-        <form id="bindForm" class="stack">
-          <label>规划窗口 ID (`planner_thread_id`)
-            <input id="inputThreadId" type="text" placeholder="例如 CHAT_AR_MAIN" required />
+    <!-- Tab 1: Adaptive Current Workspace -->
+    <section id="tab-workspace" class="panel active">
+      <!-- State A: Not on a concrete /c/... conversation -->
+      <div id="viewEmptyTab" class="card empty-card hidden">
+        <div class="empty-icon">💬</div>
+        <h2 id="emptyStateTitle">未打开具体对话</h2>
+        <p id="emptyStateDesc" class="meta">
+          请切换到任意 <code>chatgpt.com</code> 具体会话页（支持普通对话与 Projects 项目内对话），即可一键纳入同步。
+        </p>
+        <div class="btn-row center-row">
+          <button id="btnOpenChatGpt" type="button" class="btn btn-primary btn-sm">前往 ChatGPT</button>
+          <button id="btnJumpAllThreads" type="button" class="btn btn-sm">查看已绑定窗口</button>
+        </div>
+      </div>
+
+      <!-- State B: Unbound Conversation -> Zero-friction 1-Click Onboarding -->
+      <div id="viewUnbound" class="card stack hidden">
+        <div class="row-between">
+          <span class="chip chip-muted">未同步 · 隐私隔离中</span>
+          <span class="meta" id="unboundMsgCount">-</span>
+        </div>
+
+        <form id="quickBindForm" class="stack">
+          <label class="field">
+            <span class="field-label">对话名称</span>
+            <input id="quickTitle" type="text" placeholder="自动识别网页标题" required />
           </label>
-          <label>所属项目 ID (`project_id`)
-            <input id="inputProjectId" type="text" placeholder="例如 AR_NORTH_PACIFIC" required />
-          </label>
-          <label>窗口名称 (`title`)
-            <input id="inputTitle" type="text" placeholder="例如 北太平洋大气河主线" required />
-          </label>
-          <label>职责说明（可选）
-            <input id="inputRoleDesc" type="text" placeholder="主科研路线与核心方法拍板" />
-          </label>
-          <label class="checkbox-row">
-            <input id="chkSyncEnabled" type="checkbox" checked />
-            <span>加入白名单并开启增量同步</span>
-          </label>
-          <label class="checkbox-row warn-row">
-            <input id="chkAutoSend" type="checkbox" />
-            <span>允许此窗口自动发送提问队列（默认关闭，带冷却与 5 次熔断护栏）</span>
-          </label>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary">绑定 / 更新当前窗口</button>
-            <button type="button" id="btnUnbind" class="btn btn-danger-outline">移出白名单</button>
+
+          <div class="field">
+            <div class="row-between">
+              <span class="field-label">所属课题 / 项目</span>
+              <span id="projectHintBadge" class="meta hidden">已从 URL 识别项目组</span>
+            </div>
+            <div id="projectChips" class="chip-grid"></div>
+            <input id="quickProject" type="text" placeholder="例如：大气河研究 或 AR_NP" required />
           </div>
+
+          <label class="switch-row">
+            <input id="chkQuickBackfill" type="checkbox" checked />
+            <span>绑定后立即补齐本对话已有全部历史（推荐）</span>
+          </label>
+
+          <button type="submit" id="btnQuickBind" class="btn btn-primary btn-block">
+            一键纳入巴别塔并同步
+          </button>
+
+          <details class="fold-block">
+            <summary>高级选项（自定义窗口 ID / 职责 / 自动发送）</summary>
+            <div class="fold-body stack">
+              <label class="field">
+                <span class="field-label">内部窗口 ID（仅字母数字与下划线）</span>
+                <input id="quickThreadId" type="text" placeholder="自动生成，可留空" />
+              </label>
+              <label class="field">
+                <span class="field-label">窗口职责备注（可选）</span>
+                <input id="quickRoleDesc" type="text" placeholder="例如：主科研路线与核心方法拍板" />
+              </label>
+              <label class="switch-row warn-box">
+                <input id="chkQuickAutoSend" type="checkbox" />
+                <span>允许此窗口自动发送 AI 提问（默认关闭，带 15s 冷却与 5 次熔断）</span>
+              </label>
+            </div>
+          </details>
         </form>
       </div>
 
-      <div class="card stack">
-        <h2>同步控制</h2>
-        <div class="btn-row">
-          <button id="btnSyncVisible" class="btn">增量同步当前可见对话</button>
-          <button id="btnBackfillHistory" class="btn">全量同步本窗口历史（同源）</button>
+      <!-- State C: Bound Conversation -> Sleek Workspace Console -->
+      <div id="viewBound" class="stack hidden">
+        <!-- Priority Blocking Questions (hidden when count == 0) -->
+        <div id="cardQuestions" class="card stack question-card hidden">
+          <div class="row-between">
+            <div class="row-gap">
+              <span class="chip chip-amber">待你回答</span>
+              <strong id="questionsCountLabel">0 条阻塞提问</strong>
+            </div>
+            <button id="btnRefreshInbox" type="button" class="btn btn-xs">刷新</button>
+          </div>
+          <div id="questionsList" class="stack"></div>
+          <div id="triageList" class="stack"></div>
         </div>
-        <div class="row-between">
-          <span class="meta">离线重试队列：<strong id="retryQueueCount">0</strong> 批</span>
-          <button id="btnFlushQueue" class="btn btn-sm">立即重传</button>
+
+        <!-- Bound Hero Card -->
+        <div class="card stack">
+          <div class="row-between align-start">
+            <div class="stack-tight">
+              <div class="row-gap wrap">
+                <h2 id="boundTitleDisplay" class="hero-title">-</h2>
+                <span class="chip chip-ok"><span class="dot-ok"></span>同步中</span>
+              </div>
+              <div class="row-gap wrap">
+                <span id="boundProjectChip" class="chip chip-soft">-</span>
+                <button id="btnCopyThreadId" type="button" class="chip chip-mono" title="点击复制规划窗口 ID">
+                  <code id="boundThreadIdText">-</code>
+                </button>
+                <span id="boundTurnBadge" class="meta">0 轮</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="btn-grid-2">
+            <button id="btnCopyStartPrompt" type="button" class="btn btn-soft-primary">
+              📋 复制开工口令
+            </button>
+            <button id="btnQuickInjectContext" type="button" class="btn">
+              ✨ 填入最新上下文
+            </button>
+          </div>
         </div>
-        <div class="row-between">
-          <span class="meta">滚动压缩：<strong id="compactionSummaryText">-</strong></span>
-          <button id="btnRefreshCompaction" class="btn btn-sm">检查候选</button>
+
+        <!-- Sync & Compaction Card -->
+        <div class="card stack">
+          <div class="row-between">
+            <span class="card-subtitle">同步与压缩</span>
+            <div class="row-gap">
+              <button id="btnSyncVisible" type="button" class="btn btn-xs">同步可见</button>
+              <button id="btnBackfillHistory" type="button" class="btn btn-xs">补齐全部历史</button>
+            </div>
+          </div>
+
+          <div class="compaction-box">
+            <div class="row-between">
+              <span class="meta" id="compactionSummaryText">计算压缩进度中…</span>
+              <span class="chip chip-soft" id="digestCountChip">摘要 0 份</span>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <div id="compactionProgressBar" class="progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="row-between">
+              <span class="meta-xs">保留最新 20 轮原文 · 本机自动检测（插电 10m / 电池 30m）</span>
+              <button id="btnRefreshCompaction" type="button" class="link-btn">刷新</button>
+            </div>
+          </div>
+
+          <details id="boundSettingsFold" class="fold-block">
+            <summary>窗口设置与安全解绑</summary>
+            <form id="boundEditForm" class="fold-body stack">
+              <label class="field">
+                <span class="field-label">窗口标题</span>
+                <input id="editTitle" type="text" required />
+              </label>
+              <label class="field">
+                <span class="field-label">所属项目</span>
+                <input id="editProject" type="text" required />
+              </label>
+              <label class="field">
+                <span class="field-label">职责备注</span>
+                <input id="editRoleDesc" type="text" />
+              </label>
+              <label class="switch-row warn-box">
+                <input id="chkEditAutoSend" type="checkbox" />
+                <span>允许此窗口自动发送 AI 提问（含冷却与 5 次熔断护栏）</span>
+              </label>
+              <div class="row-between">
+                <button type="submit" class="btn btn-sm btn-primary">保存设置</button>
+                <button type="button" id="btnUnbind" class="btn btn-sm btn-danger-outline">移出白名单</button>
+              </div>
+            </form>
+          </details>
         </div>
-        <p id="syncStatusMsg" class="status-msg"></p>
       </div>
     </section>
 
-    <!-- Tab 2: Pending Questions & Triage -->
-    <section id="tab-inbox" class="panel">
-      <div class="card">
-        <div class="row-between">
-          <h2>待回答提问队列</h2>
-          <button id="btnRefreshInbox" class="btn btn-sm">刷新队列</button>
-        </div>
-        <div id="questionsList" class="stack"></div>
-      </div>
-
-      <div class="card">
-        <h2>待分诊问题（NEEDS_TRIAGE）</h2>
-        <div id="triageList" class="stack"></div>
-      </div>
-    </section>
-
-    <!-- Tab 3: Context Inject, Search & Decision Management -->
+    <!-- Tab 2: Decisions, Search & Context -->
     <section id="tab-decisions" class="panel">
       <div class="card stack">
-        <h2>上下文读取与检索</h2>
-        <div class="input-inline">
-          <input id="inputSearchQuery" type="text" placeholder="输入关键词检索全部工作窗口原文…" />
-          <button id="btnSearchDialogue" class="btn">检索</button>
+        <div class="row-between">
+          <h2>跨窗口原文检索</h2>
+          <button id="btnLoadContext" type="button" class="btn btn-xs btn-soft-primary">注入上下文</button>
         </div>
-        <div class="btn-row">
-          <button id="btnLoadContext" class="btn btn-primary">一键拉取上下文并填入 ChatGPT</button>
+        <div class="input-inline">
+          <input id="inputSearchQuery" type="text" placeholder="搜索参数、结论或历史讨论…" />
+          <button id="btnSearchDialogue" type="button" class="btn btn-primary btn-sm">检索</button>
         </div>
         <div id="contextPreview" class="preview-box hidden"></div>
       </div>
 
-      <div class="card stack">
+      <div id="proposedCard" class="card stack hidden">
         <div class="row-between">
-          <h2>待审批建议（PROPOSED）</h2>
-          <button id="btnRefreshDecisions" class="btn btn-sm">刷新</button>
+          <h2>待审批提案 <span id="proposedCountChip" class="chip chip-amber">0</span></h2>
         </div>
         <div id="proposedDecisionsList" class="stack"></div>
       </div>
 
       <div class="card stack">
-        <h2>生效中正式决策（APPROVED）与更新换代</h2>
-        <div id="approvedDecisionsList" class="stack"></div>
-
-        <hr />
-        <h3 id="decisionFormTitle">发布新正式决策（APPROVED）</h3>
-        <form id="decisionForm" class="stack">
-          <input id="inputSupersedesId" type="hidden" value="" />
-          <label>标题
-            <input id="inputDecisionTitle" type="text" placeholder="例如 统一采用 IVT >= 250 判据" required />
-          </label>
-          <label>正式结论正文
-            <textarea id="inputDecisionContent" rows="3" placeholder="写明拍板结论、参数与边界" required></textarea>
-          </label>
-          <label>依据与理由（可选）
-            <input id="inputDecisionRationale" type="text" placeholder="依据与实验对比结果" />
-          </label>
-          <label>否决备选方案（可选）
-            <input id="inputDecisionRejected" type="text" placeholder="为何否决其他备选方法" />
-          </label>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary">批准生效</button>
-            <button type="button" id="btnCancelSupersede" class="btn hidden">取消换代</button>
+        <div class="row-between">
+          <h2>生效中正式决策</h2>
+          <div class="row-gap">
+            <button id="btnRefreshDecisions" type="button" class="btn btn-xs">刷新</button>
+            <button id="btnToggleNewDecision" type="button" class="btn btn-xs btn-primary">+ 发布决策</button>
           </div>
-        </form>
+        </div>
+
+        <div id="decisionFormWrap" class="fold-card stack hidden">
+          <div class="row-between">
+            <strong id="decisionFormTitle">发布新正式决策</strong>
+            <button id="btnCancelDecisionForm" type="button" class="link-btn">收起</button>
+          </div>
+          <form id="decisionForm" class="stack">
+            <input id="inputSupersedesId" type="hidden" value="" />
+            <input id="inputDecisionTitle" type="text" placeholder="标题，如：统一采用 IVT >= 250 判据" required />
+            <textarea id="inputDecisionContent" rows="3" placeholder="正式结论、参数与约束边界" required></textarea>
+            <input id="inputDecisionRationale" type="text" placeholder="依据与理由（可选）" />
+            <input id="inputDecisionRejected" type="text" placeholder="否决备选方案（可选）" />
+            <button type="submit" class="btn btn-primary btn-sm">批准并生效</button>
+          </form>
+        </div>
+
+        <div id="approvedDecisionsList" class="stack"></div>
       </div>
     </section>
 
-    <!-- Tab 4: Settings -->
-    <section id="tab-settings" class="panel">
+    <!-- Tab 3: All Synced Threads & Hub Settings -->
+    <section id="tab-hub" class="panel">
       <div class="card stack">
-        <h2>Hub 连接设置（仅保存在本机浏览器）</h2>
+        <div class="row-between">
+          <h2>全部已绑定窗口</h2>
+          <button id="btnRefreshAllThreads" type="button" class="btn btn-xs">刷新列表</button>
+        </div>
+        <div id="allThreadsList" class="stack"></div>
+      </div>
+
+      <div class="card stack">
+        <h2>Hub 连接设置（仅存本机浏览器）</h2>
         <form id="settingsForm" class="stack">
-          <label>Hub 服务地址
+          <label class="field">
+            <span class="field-label">Hub 服务地址</span>
             <input id="inputHubUrl" type="url" placeholder="https://hub.atmosphericduct.xyz" required />
           </label>
-          <label>Bridge Token
-            <input id="inputBridgeToken" type="password" placeholder="粘贴服务端 TOWER_BRIDGE_TOKEN" required />
+          <label class="field">
+            <span class="field-label">Bridge Token</span>
+            <div class="input-inline">
+              <input id="inputBridgeToken" type="password" placeholder="粘贴 TOWER_BRIDGE_TOKEN" required />
+              <button id="btnToggleTokenVis" type="button" class="btn btn-sm" title="显示/隐藏 Token">👁</button>
+            </div>
           </label>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary">保存设置</button>
-            <button type="button" id="btnTestConn" class="btn">测试连通性</button>
-          </div>
+          <button type="submit" id="btnSaveAndTest" class="btn btn-primary btn-block">保存并验证连通</button>
         </form>
-        <p id="settingsStatusMsg" class="status-msg"></p>
+        <p id="settingsStatusMsg" class="meta"></p>
+
+        <div class="divider"></div>
+        <div class="row-between">
+          <span class="meta">离线重试队列：<strong id="retryQueueCount">0</strong> 批</span>
+          <button id="btnFlushQueue" type="button" class="btn btn-xs">立即重传</button>
+        </div>
       </div>
     </section>
   </main>
 
+  <div id="toastBanner" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="../shared/thread-helpers.js"></script>
   <script src="../shared/api-client.js"></script>
   <script src="../shared/auto-send-guard.js"></script>
   <script src="../shared/retry-queue.js"></script>
