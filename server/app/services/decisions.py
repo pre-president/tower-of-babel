@@ -199,3 +199,14 @@ def list_decisions(
         if d.status == "APPROVED" and d.supersedes_decision_id
     ]
     return rows, notices
+
+
+def get_decision_by_id(db: Session, decision_id: str) -> Decision:
+    """Return a single decision record by ID."""
+    dec = db.get(Decision, decision_id)
+    if dec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Decision '{decision_id}' not found",
+        )
+    return dec

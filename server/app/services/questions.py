@@ -119,3 +119,11 @@ def resolve_question(
     db.commit()
     db.refresh(q)
     return q
+
+
+def get_question_by_id(db: Session, question_id: str) -> Question:
+    """Fetch a single question record by ID."""
+    q = db.get(Question, question_id)
+    if q is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    return q

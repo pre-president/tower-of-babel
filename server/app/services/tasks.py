@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Actor, get_settings
 from app.models import ExecutionTask, PlannerThread, TaskCheckpoint, utc_now
 from app.schemas import (
+    CheckpointTraceOut,
     ConfirmHandoffRequest,
     HandoffPackageOut,
     ProjectContextOut,
     StartWorkFromChatRequest,
     TaskClaimRequest,
+    TaskContextOut,
     TaskCreateRequest,
     TaskHandoffRequest,
     TaskProgressRequest,
@@ -451,3 +453,73 @@ def update_task_status(
     db.commit()
     db.refresh(task)
     return task
+
+
+def get_task_context(db: Session, task_id: str, chat_turn_limit: int = 20) -> TaskContextOut:
+    """Return task metadata, planner context (~15-20 Chat turns + decisions), and latest checkpoint."""
+    task = db.get(ExecutionTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    thread = db.get(PlannerThread, task.planner_thread_id)
+    if thread is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planner thread not found")
+
+    ctx = build_project_context(db, thread, chat_turn_limit=chat_turn_limit)
+    latest_ckpt = db.scalar(
+        select(TaskCheckpoint)
+        .where(TaskCheckpoint.task_id == task_id)
+        .order_by(TaskCheckpoint.created_at.desc())
+        .limit(1)
+    )
+    return TaskContextOut(
+        task=task,  # type: ignore[arg-type]
+        thread=ctx.thread,
+        active_decisions=ctx.active_decisions,
+        superseded_notice=ctx.superseded_notice,
+        digests=ctx.digests,
+        recent_chat_turns=ctx.recent_chat_turns,
+        latest_checkpoint=latest_ckpt,  # type: ignore[arg-type]
+    )
+
+
+def get_execution_status(
+    db: Session, *, project_id: str | None = None, planner_thread_id: str | None = None
+) -> list[ExecutionTask]:
+    """List execution tasks and lease ownership across a project or planner thread."""
+    stmt = select(ExecutionTask).order_by(ExecutionTask.updated_at.desc())
+    if project_id:
+        stmt = stmt.where(ExecutionTask.project_id == project_id)
+    if planner_thread_id:
+        stmt = stmt.where(ExecutionTask.planner_thread_id == planner_thread_id)
+    return list(db.scalars(stmt).all())
+
+
+def get_checkpoint_trace(
+    db: Session, task_id: str, *, offset: int = 0, limit: int = 20
+) -> CheckpointTraceOut:
+    """Paginate detailed checkpoints & historical execution turns for on-demand expansion."""
+    task = db.get(ExecutionTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    total = int(
+        db.scalar(
+            select(func.count(TaskCheckpoint.checkpoint_id)).where(TaskCheckpoint.task_id == task_id)
+        )
+        or 0
+    )
+    rows = list(
+        db.scalars(
+            select(TaskCheckpoint)
+            .where(TaskCheckpoint.task_id == task_id)
+            .order_by(TaskCheckpoint.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    )
+    return CheckpointTraceOut(
+        task_id=task_id,
+        total_checkpoints=total,
+        offset=offset,
+        limit=limit,
+        checkpoints=rows,  # type: ignore[arg-type]
+    )

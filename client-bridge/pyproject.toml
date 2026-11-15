@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tower-of-babel-bridge"
+version = "0.2.0"
+description = "Tower of Babel — Zero-dependency local MCP stdio proxy, .jsonl transcript adapters, and CLI handoff tools"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Zheng Jiangyu", email = "JiangyuZheng1907@outlook.com" },
+]
+dependencies = []
+
+[project.scripts]
+tower-handoff = "tower_bridge.handoff_cli:main"
+tower-mcp-proxy = "tower_bridge.mcp_stdio_proxy:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tower_bridge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

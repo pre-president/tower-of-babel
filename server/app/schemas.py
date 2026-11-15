@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,7 +13,10 @@ class OrmModel(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-PlatformType = Literal["chatgpt", "gemini_antigravity", "deepseek_claudecode", "gpt_codex"]
+
+# Built-in defaults: chatgpt, gemini_antigravity, deepseek_claudecode, gpt_codex;
+# extensible slug allows cursor, windsurf, claude, ollama, etc.
+PlatformType = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^[a-z0-9_-]+$")]
 RoleType = Literal["user", "assistant"]
 DecisionStatus = Literal["PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED"]
 TaskStatus = Literal[
@@ -283,3 +286,40 @@ class HandoffPackageOut(BaseModel):
     git_commit: str | None
     git_diff_patch: str | None
     local_artifact_refs: list[dict]
+
+
+class CheckpointDetailOut(OrmModel):
+    checkpoint_id: str
+    task_id: str
+    agent_id: str
+    session_id: str
+    checkpoint_type: str
+    completed_steps: list[str]
+    current_step: str
+    next_steps: list[str]
+    blockers: str
+    execution_digest: str
+    execution_turns_json: list[dict]
+    execution_trace_excerpt: str
+    git_commit: str | None
+    git_diff_patch: str | None
+    local_artifact_refs: list[dict]
+    created_at: datetime
+
+
+class TaskContextOut(BaseModel):
+    task: TaskOut
+    thread: ThreadOut
+    active_decisions: list[DecisionOut]
+    superseded_notice: list[dict]
+    digests: list[dict]
+    recent_chat_turns: list[DialogueMessageOut]
+    latest_checkpoint: CheckpointDetailOut | None = None
+
+
+class CheckpointTraceOut(BaseModel):
+    task_id: str
+    total_checkpoints: int
+    offset: int
+    limit: int
+    checkpoints: list[CheckpointDetailOut]

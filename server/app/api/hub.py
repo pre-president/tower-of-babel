@@ -12,6 +12,7 @@ from app.db import get_db
 from app.schemas import (
     ArtifactOut,
     ArtifactRegisterRequest,
+    CheckpointTraceOut,
     ConfirmHandoffRequest,
     DecisionOut,
     DecisionProposeRequest,
@@ -23,6 +24,7 @@ from app.schemas import (
     QuestionSubmitRequest,
     StartWorkFromChatRequest,
     TaskClaimRequest,
+    TaskContextOut,
     TaskCreateRequest,
     TaskHandoffRequest,
     TaskOut,
@@ -31,23 +33,26 @@ from app.schemas import (
     ThreadOut,
 )
 from app.services.artifacts import list_artifacts, register_artifact
-from app.services.decisions import list_decisions, propose_decision
+from app.services.decisions import get_decision_by_id, list_decisions, propose_decision
 from app.services.dialogues import get_conversation_range, get_recent_messages, search_dialogue
-from app.services.questions import list_pending_questions, submit_question
+from app.services.questions import get_question_by_id, list_pending_questions, submit_question
 from app.services.tasks import (
     build_project_context,
     claim_handoff,
     claim_task,
     confirm_handoff,
     create_task,
+    get_checkpoint_trace,
+    get_execution_status,
     get_handoff_package,
+    get_task_context,
     handoff_task,
     list_pending_tasks,
     report_progress,
     start_work_from_chat,
     update_task_status,
 )
-from app.services.threads import resolve_chat_thread
+from app.services.threads import list_threads, resolve_chat_thread
 
 router = APIRouter(prefix="/api/v1/hub", tags=["hub"])
 
@@ -74,6 +79,15 @@ class TaskStatusUpdateRequest(BaseModel):
     status: TaskStatus
     session_id: str = ""
     summary: str = ""
+
+
+@router.get("/threads", response_model=list[ThreadOut])
+def list_threads_endpoint(
+    project_id: str | None = Query(default=None),
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> list[ThreadOut]:
+    return list_threads(db, project_id=project_id)  # type: ignore[return-value]
 
 
 @router.get("/threads/resolve", response_model=ThreadOut)
@@ -155,6 +169,15 @@ def list_decisions_endpoint(
     return DecisionListOut(decisions=rows, superseded_notice=notices)  # type: ignore[arg-type]
 
 
+@router.get("/decisions/{decision_id}", response_model=DecisionOut)
+def get_decision_endpoint(
+    decision_id: str,
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> DecisionOut:
+    return get_decision_by_id(db, decision_id)  # type: ignore[return-value]
+
+
 @router.post("/decisions/propose", response_model=DecisionOut)
 def propose_decision_endpoint(
     req: DecisionProposeRequest,
@@ -180,6 +203,39 @@ def pending_tasks_endpoint(
     db: Session = Depends(get_db),
 ) -> list[TaskOut]:
     return list_pending_tasks(db, project_id=project_id)  # type: ignore[return-value]
+
+
+@router.get("/execution-status", response_model=list[TaskOut])
+def execution_status_endpoint(
+    project_id: str | None = Query(default=None),
+    planner_thread_id: str | None = Query(default=None),
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> list[TaskOut]:
+    return get_execution_status(  # type: ignore[return-value]
+        db, project_id=project_id, planner_thread_id=planner_thread_id
+    )
+
+
+@router.get("/tasks/{task_id}/context", response_model=TaskContextOut)
+def task_context_endpoint(
+    task_id: str,
+    chat_turn_limit: int = Query(default=20, ge=1, le=50),
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> TaskContextOut:
+    return get_task_context(db, task_id, chat_turn_limit=chat_turn_limit)
+
+
+@router.get("/tasks/{task_id}/trace", response_model=CheckpointTraceOut)
+def checkpoint_trace_endpoint(
+    task_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=50),
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> CheckpointTraceOut:
+    return get_checkpoint_trace(db, task_id, offset=offset, limit=limit)
 
 
 @router.post("/tasks/{task_id}/claim", response_model=TaskOut)
@@ -269,6 +325,15 @@ def list_questions_endpoint(
     db: Session = Depends(get_db),
 ) -> list[QuestionOut]:
     return list_pending_questions(db, planner_thread_id=planner_thread_id)  # type: ignore[return-value]
+
+
+@router.get("/questions/{question_id}", response_model=QuestionOut)
+def get_question_endpoint(
+    question_id: str,
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> QuestionOut:
+    return get_question_by_id(db, question_id)  # type: ignore[return-value]
 
 
 @router.post("/artifacts", response_model=ArtifactOut)
