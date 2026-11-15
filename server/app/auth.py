@@ -52,3 +52,26 @@ def require_bridge(
             detail="Forbidden: this operation requires Bridge authorization",
         )
     return actor
+
+
+def require_bridge_or_summarizer(
+    actor: Actor = Depends(get_current_actor),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> Actor:
+    """Restrict digest writes to Bridge or explicitly configured summarizer actors."""
+    if actor.role == "bridge" or actor.actor_id in settings.summarizer_actor_set():
+        return actor
+    record_audit(
+        db,
+        actor=actor,
+        action="auth_denied_summarizer_only",
+        target_type="auth",
+        target_id=actor.actor_id,
+        detail={"reason": "Actor is not authorized to submit rolling thread digests"},
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Forbidden: requires Bridge or authorized summarizer actor",
+    )

@@ -279,6 +279,34 @@
     }
   }
 
+  async function refreshCompactionStatus() {
+    const el = $("compactionSummaryText");
+    if (!el) return;
+    const b = currentBinding();
+    if (!b || !state.settings.bridgeToken) {
+      el.textContent = "-";
+      return;
+    }
+    try {
+      const [cands, digests] = await Promise.all([
+        Api.getCompactionCandidates(state.settings),
+        Api.listDigests(state.settings, b.planner_thread_id),
+      ]);
+      const match = (cands || []).find((c) => c.planner_thread_id === b.planner_thread_id);
+      const count = (digests || []).length;
+      if (!match) {
+        el.textContent = `已有 ${count} 份摘要`;
+        return;
+      }
+      const chars = Number(match.eligible_char_count || 0).toLocaleString();
+      el.textContent = match.should_compact
+        ? `待压缩 ${chars} 字 / 摘要 ${count} 份（可运行本机 tower-compact）`
+        : `未超阈值（待压缩 ${chars} 字 / 摘要 ${count} 份）`;
+    } catch {
+      el.textContent = "查询失败";
+    }
+  }
+
   function makeBtn(label, onClick, extraClass = "") {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -434,6 +462,7 @@
 
     $("btnRefreshInbox").addEventListener("click", refreshInbox);
     $("btnRefreshDecisions").addEventListener("click", refreshDecisions);
+    $("btnRefreshCompaction").addEventListener("click", refreshCompactionStatus);
 
     $("btnLoadContext").addEventListener("click", async () => {
       const b = currentBinding();
@@ -493,6 +522,7 @@
     await loadStorage();
     await checkHubHealth();
     await renderTabState();
+    await refreshCompactionStatus();
     await refreshInbox();
     await refreshDecisions();
   });

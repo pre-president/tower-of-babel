@@ -16,6 +16,7 @@ dependencies = []
 [project.scripts]
 tower-handoff = "tower_bridge.handoff_cli:main"
 tower-mcp-proxy = "tower_bridge.mcp_stdio_proxy:main"
+tower-compact = "tower_bridge.compact_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

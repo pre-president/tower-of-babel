@@ -68,5 +68,9 @@
       request(s, "POST", `/api/v1/bridge/decisions/${encodeURIComponent(decisionId)}/reject`, {
         reason,
       }),
+    getCompactionCandidates: (s) =>
+      request(s, "GET", "/api/v1/bridge/compaction/candidates"),
+    listDigests: (s, threadId) =>
+      request(s, "GET", `/api/v1/hub/threads/${encodeURIComponent(threadId)}/digests`),
   };
 });

@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_actor
+from app.auth import get_current_actor, require_bridge_or_summarizer
 from app.config import Actor
 from app.db import get_db
 from app.schemas import (
     ArtifactOut,
     ArtifactRegisterRequest,
     CheckpointTraceOut,
+    CompactionPlanOut,
     ConfirmHandoffRequest,
     DecisionOut,
     DecisionProposeRequest,
@@ -30,11 +31,20 @@ from app.schemas import (
     TaskOut,
     TaskProgressRequest,
     TaskStatus,
+    ThreadDigestCreateRequest,
+    ThreadDigestOut,
     ThreadOut,
 )
 from app.services.artifacts import list_artifacts, register_artifact
 from app.services.decisions import get_decision_by_id, list_decisions, propose_decision
-from app.services.dialogues import get_conversation_range, get_recent_messages, search_dialogue
+from app.services.dialogues import (
+    build_compaction_plan,
+    get_conversation_range,
+    get_recent_messages,
+    get_thread_digests,
+    save_thread_digest,
+    search_dialogue,
+)
 from app.services.questions import get_question_by_id, list_pending_questions, submit_question
 from app.services.tasks import (
     build_project_context,
@@ -153,6 +163,45 @@ def range_dialogues_endpoint(
     db: Session = Depends(get_db),
 ) -> list[DialogueMessageOut]:
     return get_conversation_range(db, planner_thread_id, start_turn, end_turn)  # type: ignore[return-value]
+
+
+@router.get("/threads/{planner_thread_id}/digests", response_model=list[ThreadDigestOut])
+def list_digests_endpoint(
+    planner_thread_id: str,
+    _: Actor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> list[ThreadDigestOut]:
+    return get_thread_digests(db, planner_thread_id)  # type: ignore[return-value]
+
+
+@router.get("/threads/{planner_thread_id}/compaction-plan", response_model=CompactionPlanOut)
+def hub_compaction_plan_endpoint(
+    planner_thread_id: str,
+    protect_recent_turns: int = Query(default=20, ge=0, le=100),
+    threshold_chars: int = Query(default=150_000, ge=1000, le=1_000_000),
+    max_batch_chars: int = Query(default=250_000, ge=5000, le=800_000),
+    force: bool = Query(default=False),
+    _: Actor = Depends(require_bridge_or_summarizer),
+    db: Session = Depends(get_db),
+) -> CompactionPlanOut:
+    return build_compaction_plan(
+        db,
+        planner_thread_id,
+        protect_recent_turns=protect_recent_turns,
+        threshold_chars=threshold_chars,
+        max_batch_chars=max_batch_chars,
+        force=force,
+    )
+
+
+@router.post("/threads/{planner_thread_id}/digests", response_model=ThreadDigestOut)
+def hub_create_digest_endpoint(
+    planner_thread_id: str,
+    req: ThreadDigestCreateRequest,
+    actor: Actor = Depends(require_bridge_or_summarizer),
+    db: Session = Depends(get_db),
+) -> ThreadDigestOut:
+    return save_thread_digest(db, actor, planner_thread_id, req)  # type: ignore[return-value]
 
 
 @router.get("/decisions", response_model=DecisionListOut)

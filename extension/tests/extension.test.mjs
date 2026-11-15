@@ -7,6 +7,7 @@ const Dom = require("../src/content/dom-adapter.js");
 const Tree = require("../src/shared/history-tree.js");
 const Guard = require("../src/shared/auto-send-guard.js");
 const RetryQ = require("../src/shared/retry-queue.js");
+const Api = require("../src/shared/api-client.js");
 
 function makeNode({ nodeType = 1, tagName = "DIV", attrs = {}, textContent = "", childNodes = [] }) {
   return {
@@ -205,4 +206,9 @@ test("Retry queue deduplicates and flushes in chronological order", async () => 
   assert.equal(res2.sentCount, 2);
   assert.equal(res2.remaining.length, 0);
   assert.deepEqual(delivered, ["A", "B"]);
+});
+
+test("API client exposes compaction candidates and thread digest helpers", () => {
+  assert.equal(typeof Api.getCompactionCandidates, "function");
+  assert.equal(typeof Api.listDigests, "function");
 });

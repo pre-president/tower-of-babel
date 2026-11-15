@@ -29,6 +29,7 @@ from app.schemas import (
     TaskOut,
     TaskProgressRequest,
     TaskStatus,
+    ThreadDigestOut,
     ThreadOut,
 )
 from app.services.artifacts import list_artifacts, register_artifact
@@ -39,7 +40,12 @@ from app.services.decisions import (
     list_decisions,
     propose_decision,
 )
-from app.services.dialogues import get_conversation_range, get_recent_messages, search_dialogue
+from app.services.dialogues import (
+    get_conversation_range,
+    get_recent_messages,
+    get_thread_digests,
+    search_dialogue,
+)
 from app.services.questions import (
     get_question_by_id,
     list_pending_questions,
@@ -166,6 +172,10 @@ class GetRecentDiscussionsInput(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
 
 
+class GetThreadDigestsInput(BaseModel):
+    planner_thread_id: str = Field(..., min_length=1)
+
+
 class GetDecisionsInput(BaseModel):
     project_id: str | None = None
     planner_thread_id: str | None = None
@@ -284,6 +294,11 @@ def _h_get_conv(db: Session, _actor: Actor, req: GetConversationInput) -> dict[s
 def _h_recent_disc(db: Session, _actor: Actor, req: GetRecentDiscussionsInput) -> dict[str, Any]:
     rows = get_recent_messages(db, req.planner_thread_id, limit=req.limit)
     return _dump_many(DialogueMessageOut, rows, untrusted=True)
+
+
+def _h_get_digests(db: Session, _actor: Actor, req: GetThreadDigestsInput) -> dict[str, Any]:
+    rows = get_thread_digests(db, req.planner_thread_id)
+    return _dump_many(ThreadDigestOut, rows, untrusted=True)
 
 
 def _h_get_decisions(db: Session, _actor: Actor, req: GetDecisionsInput) -> dict[str, Any]:
@@ -447,6 +462,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "Fetch latest N turns from a planning window.",
         GetRecentDiscussionsInput,
         _h_recent_disc,
+    ),
+    ToolSpec(
+        "get_thread_digests",
+        "Fetch DeepSeek rolling stage digests for compressed historical turns in a planning window.",
+        GetThreadDigestsInput,
+        _h_get_digests,
     ),
     ToolSpec(
         "get_decisions",

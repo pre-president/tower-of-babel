@@ -12,6 +12,8 @@ from app.config import Actor
 from app.db import get_db
 from app.models import Decision
 from app.schemas import (
+    CompactionCandidateOut,
+    CompactionPlanOut,
     DecisionApproveRequest,
     DecisionOut,
     MessagesSyncRequest,
@@ -19,11 +21,19 @@ from app.schemas import (
     ProjectContextOut,
     QuestionOut,
     QuestionResolveRequest,
+    ThreadDigestCreateRequest,
+    ThreadDigestOut,
     ThreadOut,
     ThreadRegisterRequest,
 )
 from app.services.decisions import approve_or_supersede_decision, reject_decision
-from app.services.dialogues import search_dialogue, sync_messages
+from app.services.dialogues import (
+    build_compaction_plan,
+    list_compaction_candidates,
+    save_thread_digest,
+    search_dialogue,
+    sync_messages,
+)
 from app.services.questions import list_pending_questions, mark_question_in_chat, resolve_question
 from app.services.tasks import build_project_context
 from app.services.threads import list_threads, resolve_chat_thread, upsert_planner_thread
@@ -215,3 +225,47 @@ def load_bridge_context(
         ],
         formatted_prompt="\n".join(lines),
     )
+
+
+@router.get("/compaction/candidates", response_model=list[CompactionCandidateOut])
+def get_compaction_candidates(
+    protect_recent_turns: int = Query(default=20, ge=0, le=100),
+    threshold_chars: int = Query(default=150_000, ge=1000, le=1_000_000),
+    _: Actor = Depends(require_bridge),
+    db: Session = Depends(get_db),
+) -> list[CompactionCandidateOut]:
+    return list_compaction_candidates(
+        db,
+        protect_recent_turns=protect_recent_turns,
+        threshold_chars=threshold_chars,
+    )
+
+
+@router.get("/threads/{planner_thread_id}/compaction-plan", response_model=CompactionPlanOut)
+def get_thread_compaction_plan(
+    planner_thread_id: str,
+    protect_recent_turns: int = Query(default=20, ge=0, le=100),
+    threshold_chars: int = Query(default=150_000, ge=1000, le=1_000_000),
+    max_batch_chars: int = Query(default=250_000, ge=5000, le=800_000),
+    force: bool = Query(default=False),
+    _: Actor = Depends(require_bridge),
+    db: Session = Depends(get_db),
+) -> CompactionPlanOut:
+    return build_compaction_plan(
+        db,
+        planner_thread_id,
+        protect_recent_turns=protect_recent_turns,
+        threshold_chars=threshold_chars,
+        max_batch_chars=max_batch_chars,
+        force=force,
+    )
+
+
+@router.post("/threads/{planner_thread_id}/digests", response_model=ThreadDigestOut)
+def create_bridge_digest(
+    planner_thread_id: str,
+    req: ThreadDigestCreateRequest,
+    actor: Actor = Depends(require_bridge),
+    db: Session = Depends(get_db),
+) -> ThreadDigestOut:
+    return save_thread_digest(db, actor, planner_thread_id, req)  # type: ignore[return-value]

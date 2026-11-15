@@ -323,3 +323,53 @@ class CheckpointTraceOut(BaseModel):
     offset: int
     limit: int
     checkpoints: list[CheckpointDetailOut]
+
+
+class ThreadDigestOut(OrmModel):
+    digest_id: str
+    planner_thread_id: str
+    project_id: str
+    start_turn: int
+    end_turn: int
+    source_char_count: int
+    digest_char_count: int
+    digest_content: str
+    summarizer_model: str
+    created_at: datetime
+
+
+class ThreadDigestCreateRequest(BaseModel):
+    start_turn: int = Field(..., ge=1)
+    end_turn: int = Field(..., ge=1)
+    source_char_count: int = Field(..., ge=1)
+    digest_content: str = Field(..., min_length=20, max_length=40_000)
+    summarizer_model: str = Field(default="deepseek", min_length=1, max_length=64)
+    protect_recent_turns: int = Field(default=20, ge=0, le=100)
+
+
+class CompactionCandidateOut(BaseModel):
+    planner_thread_id: str
+    project_id: str
+    title: str
+    total_turns: int
+    covered_until_turn: int
+    protected_recent_turns: int
+    eligible_char_count: int
+    threshold_chars: int
+    should_compact: bool
+
+
+class CompactionPlanOut(BaseModel):
+    planner_thread_id: str
+    project_id: str
+    title: str
+    total_turns: int
+    covered_until_turn: int
+    protected_recent_turns: int
+    eligible_char_count: int
+    threshold_chars: int
+    should_compact: bool
+    start_turn: int | None = None
+    end_turn: int | None = None
+    batch_char_count: int = 0
+    messages: list[DialogueMessageOut] = Field(default_factory=list)
