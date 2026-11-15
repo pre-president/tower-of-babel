@@ -127,3 +127,37 @@ def get_question_by_id(db: Session, question_id: str) -> Question:
     if q is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
     return q
+
+
+def mark_question_in_chat(
+    db: Session, actor: Actor, question_id: str, *, planner_thread_id: str | None = None
+) -> Question:
+    """Mark a pending/triage question IN_CHAT (and optionally assign its thread)."""
+    q = db.scalar(select(Question).where(Question.question_id == question_id).with_for_update())
+    if q is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    if q.status == "RESOLVED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question is already resolved")
+
+    if planner_thread_id and not q.planner_thread_id:
+        thread = db.get(PlannerThread, planner_thread_id)
+        if thread is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Planner thread '{planner_thread_id}' not found",
+            )
+        q.planner_thread_id = planner_thread_id
+        thread.pending_question_count += 1
+
+    q.status = "IN_CHAT"
+    record_audit(
+        db,
+        actor=actor,
+        action="question_marked_in_chat",
+        target_type="question",
+        target_id=q.question_id,
+        detail={"planner_thread_id": q.planner_thread_id},
+    )
+    db.commit()
+    db.refresh(q)
+    return q

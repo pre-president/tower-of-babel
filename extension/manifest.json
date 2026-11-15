@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Tower of Babel — Chat Bridge",
+  "version": "0.3.0",
+  "description": "Whitelist-only ChatGPT planning bridge, incremental dialogue sync, decision manager, and guarded question queue for Tower of Babel.",
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "action": {
+    "default_title": "Open Tower of Babel Bridge",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://hub.atmosphericduct.xyz/*",
+    "http://127.0.0.1:8100/*",
+    "http://localhost:8100/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "src/shared/history-tree.js",
+        "src/content/dom-adapter.js",
+        "src/content/content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

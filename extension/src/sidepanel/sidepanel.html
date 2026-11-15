@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>巴别塔 · Chat Bridge</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-row">
+      <div>
+        <h1>巴别塔 · Tower of Babel</h1>
+        <span id="hubStatus" class="badge badge-muted">未连接</span>
+      </div>
+      <label class="kill-switch" title="立即暂停所有窗口自动发送">
+        <input type="checkbox" id="globalKillSwitch" />
+        <span>急停自动发送</span>
+      </label>
+    </div>
+    <div id="activeTabBanner" class="tab-banner">请打开 chatgpt.com 对话标签页</div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="window">窗口绑定</button>
+    <button class="tab" data-tab="inbox">问题队列 <span id="inboxCount" class="pill">0</span></button>
+    <button class="tab" data-tab="decisions">上下文与决策</button>
+    <button class="tab" data-tab="settings">连接设置</button>
+  </nav>
+
+  <main>
+    <!-- Tab 1: Current Window Binding & Sync -->
+    <section id="tab-window" class="panel active">
+      <div class="card">
+        <div class="row-between">
+          <h2>当前 ChatGPT 窗口</h2>
+          <button id="btnRefreshTab" class="btn btn-sm">刷新检测</button>
+        </div>
+        <p class="meta">会话 UUID：<code id="convIdText">-</code></p>
+        <p class="meta">白名单状态：<strong id="whitelistStateText">未绑定（零抓取）</strong></p>
+
+        <form id="bindForm" class="stack">
+          <label>规划窗口 ID (`planner_thread_id`)
+            <input id="inputThreadId" type="text" placeholder="例如 CHAT_AR_MAIN" required />
+          </label>
+          <label>所属项目 ID (`project_id`)
+            <input id="inputProjectId" type="text" placeholder="例如 AR_NORTH_PACIFIC" required />
+          </label>
+          <label>窗口名称 (`title`)
+            <input id="inputTitle" type="text" placeholder="例如 北太平洋大气河主线" required />
+          </label>
+          <label>职责说明（可选）
+            <input id="inputRoleDesc" type="text" placeholder="主科研路线与核心方法拍板" />
+          </label>
+          <label class="checkbox-row">
+            <input id="chkSyncEnabled" type="checkbox" checked />
+            <span>加入白名单并开启增量同步</span>
+          </label>
+          <label class="checkbox-row warn-row">
+            <input id="chkAutoSend" type="checkbox" />
+            <span>允许此窗口自动发送提问队列（默认关闭，带冷却与 5 次熔断护栏）</span>
+          </label>
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary">绑定 / 更新当前窗口</button>
+            <button type="button" id="btnUnbind" class="btn btn-danger-outline">移出白名单</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card stack">
+        <h2>同步控制</h2>
+        <div class="btn-row">
+          <button id="btnSyncVisible" class="btn">增量同步当前可见对话</button>
+          <button id="btnBackfillHistory" class="btn">全量同步本窗口历史（同源）</button>
+        </div>
+        <div class="row-between">
+          <span class="meta">离线重试队列：<strong id="retryQueueCount">0</strong> 批</span>
+          <button id="btnFlushQueue" class="btn btn-sm">立即重传</button>
+        </div>
+        <p id="syncStatusMsg" class="status-msg"></p>
+      </div>
+    </section>
+
+    <!-- Tab 2: Pending Questions & Triage -->
+    <section id="tab-inbox" class="panel">
+      <div class="card">
+        <div class="row-between">
+          <h2>待回答提问队列</h2>
+          <button id="btnRefreshInbox" class="btn btn-sm">刷新队列</button>
+        </div>
+        <div id="questionsList" class="stack"></div>
+      </div>
+
+      <div class="card">
+        <h2>待分诊问题（NEEDS_TRIAGE）</h2>
+        <div id="triageList" class="stack"></div>
+      </div>
+    </section>
+
+    <!-- Tab 3: Context Inject, Search & Decision Management -->
+    <section id="tab-decisions" class="panel">
+      <div class="card stack">
+        <h2>上下文读取与检索</h2>
+        <div class="input-inline">
+          <input id="inputSearchQuery" type="text" placeholder="输入关键词检索全部工作窗口原文…" />
+          <button id="btnSearchDialogue" class="btn">检索</button>
+        </div>
+        <div class="btn-row">
+          <button id="btnLoadContext" class="btn btn-primary">一键拉取上下文并填入 ChatGPT</button>
+        </div>
+        <div id="contextPreview" class="preview-box hidden"></div>
+      </div>
+
+      <div class="card stack">
+        <div class="row-between">
+          <h2>待审批建议（PROPOSED）</h2>
+          <button id="btnRefreshDecisions" class="btn btn-sm">刷新</button>
+        </div>
+        <div id="proposedDecisionsList" class="stack"></div>
+      </div>
+
+      <div class="card stack">
+        <h2>生效中正式决策（APPROVED）与更新换代</h2>
+        <div id="approvedDecisionsList" class="stack"></div>
+
+        <hr />
+        <h3 id="decisionFormTitle">发布新正式决策（APPROVED）</h3>
+        <form id="decisionForm" class="stack">
+          <input id="inputSupersedesId" type="hidden" value="" />
+          <label>标题
+            <input id="inputDecisionTitle" type="text" placeholder="例如 统一采用 IVT >= 250 判据" required />
+          </label>
+          <label>正式结论正文
+            <textarea id="inputDecisionContent" rows="3" placeholder="写明拍板结论、参数与边界" required></textarea>
+          </label>
+          <label>依据与理由（可选）
+            <input id="inputDecisionRationale" type="text" placeholder="依据与实验对比结果" />
+          </label>
+          <label>否决备选方案（可选）
+            <input id="inputDecisionRejected" type="text" placeholder="为何否决其他备选方法" />
+          </label>
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary">批准生效</button>
+            <button type="button" id="btnCancelSupersede" class="btn hidden">取消换代</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Tab 4: Settings -->
+    <section id="tab-settings" class="panel">
+      <div class="card stack">
+        <h2>Hub 连接设置（仅保存在本机浏览器）</h2>
+        <form id="settingsForm" class="stack">
+          <label>Hub 服务地址
+            <input id="inputHubUrl" type="url" placeholder="https://hub.atmosphericduct.xyz" required />
+          </label>
+          <label>Bridge Token
+            <input id="inputBridgeToken" type="password" placeholder="粘贴服务端 TOWER_BRIDGE_TOKEN" required />
+          </label>
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary">保存设置</button>
+            <button type="button" id="btnTestConn" class="btn">测试连通性</button>
+          </div>
+        </form>
+        <p id="settingsStatusMsg" class="status-msg"></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="../shared/api-client.js"></script>
+  <script src="../shared/auto-send-guard.js"></script>
+  <script src="../shared/retry-queue.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
