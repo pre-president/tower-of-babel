@@ -12,7 +12,8 @@
   const SELECTORS = {
     messageRoleNode: "[data-message-author-role]",
     turnRoleFallback: '[data-turn="user"], [data-turn="assistant"]',
-    turnArticleFallback: 'article[data-testid^="conversation-turn-"]',
+    turnArticleFallback: '[data-testid^="conversation-turn-"]',
+    messageIdFallback: "[data-message-id]",
     promptInputs: [
       "#prompt-textarea",
       'div[contenteditable="true"][id="prompt-textarea"]',
@@ -170,6 +171,9 @@
     }
     if (nodes.length === 0) {
       nodes = Array.from(doc.querySelectorAll(SELECTORS.turnArticleFallback));
+    }
+    if (nodes.length === 0) {
+      nodes = Array.from(doc.querySelectorAll(SELECTORS.messageIdFallback));
     }
     const out = [];
     for (let i = 0; i < nodes.length; i += 1) {

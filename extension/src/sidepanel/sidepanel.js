@@ -226,15 +226,31 @@
       const threads = await Api.listThreads(state.settings);
       state.hubThreads = Array.isArray(threads) ? threads : [];
       state.authState = "ok";
-      // Keep local bindings aligned with server truth without erasing unpushed toggles
+      // Keep local bindings and URL-to-project hints aligned with server truth
       let changed = false;
+      let groupMapChanged = false;
       for (const t of state.hubThreads) {
         if (t.chatgpt_conversation_id) {
           if (t.sync_enabled) {
             const existing = state.bindings[t.chatgpt_conversation_id];
-            if (!existing || existing.updated_at !== t.updated_at) {
+            const isDifferent =
+              !existing ||
+              existing.title !== t.title ||
+              existing.project_id !== t.project_id ||
+              existing.role_description !== t.role_description ||
+              existing.sync_enabled !== t.sync_enabled ||
+              existing.auto_send_enabled !== t.auto_send_enabled ||
+              existing.uncompressed_char_count !== t.uncompressed_char_count ||
+              existing.pending_question_count !== t.pending_question_count ||
+              existing.last_synced_at !== t.last_synced_at;
+            if (isDifferent) {
               state.bindings[t.chatgpt_conversation_id] = t;
               changed = true;
+            }
+            const hint = Helpers.parseProjectSlugFromUrl(t.chatgpt_url);
+            if (hint && t.project_id && state.projectGroupMap[hint.rawGroupKey] !== t.project_id) {
+              state.projectGroupMap[hint.rawGroupKey] = t.project_id;
+              groupMapChanged = true;
             }
           } else if (state.bindings[t.chatgpt_conversation_id]) {
             delete state.bindings[t.chatgpt_conversation_id];
@@ -242,8 +258,11 @@
           }
         }
       }
-      if (changed) {
-        await chrome.storage.local.set({ [STORAGE_KEYS.bindings]: state.bindings });
+      if (changed || groupMapChanged) {
+        await chrome.storage.local.set({
+          [STORAGE_KEYS.bindings]: state.bindings,
+          [STORAGE_KEYS.projectGroupMap]: state.projectGroupMap,
+        });
       }
       pill.className = "status-pill status-ok";
       txt.textContent = "Hub 在线";
@@ -419,19 +438,28 @@
     emptyEl.classList.add("hidden");
     unboundEl.classList.add("hidden");
     boundEl.classList.remove("hidden");
+    const convChanged = state.lastRenderedConvId !== `bound:${cid}`;
     state.lastRenderedConvId = `bound:${cid}`;
+
+    const totalChars = Number(b.uncompressed_char_count || 0);
+    const kChars = totalChars >= 1000 ? `${(totalChars / 1000).toFixed(1)}K` : `${totalChars}`;
 
     $("boundTitleDisplay").textContent = b.title || info.title || b.planner_thread_id;
     $("boundProjectChip").textContent = b.project_id || "未分组";
     $("boundThreadIdText").textContent = b.planner_thread_id;
-    $("boundTurnBadge").textContent = !info.scriptConnected
-      ? "页面未连接 · 请刷新网页"
-      : `页面可见 ${info.turnCount || 0} 轮`;
+    $("boundTurnBadge").textContent =
+      totalChars > 0
+        ? `已同步 ${kChars} 字`
+        : !info.scriptConnected
+          ? "页面未连接 · 请刷新网页"
+          : `页面可见 ${info.turnCount || 0} 轮`;
 
-    $("editTitle").value = b.title || "";
-    $("editProject").value = b.project_id || "";
-    $("editRoleDesc").value = b.role_description || "";
-    $("chkEditAutoSend").checked = Boolean(b.auto_send_enabled);
+    if (convChanged || !$("boundSettingsFold")?.open) {
+      $("editTitle").value = b.title || "";
+      $("editProject").value = b.project_id || "";
+      $("editRoleDesc").value = b.role_description || "";
+      $("chkEditAutoSend").checked = Boolean(b.auto_send_enabled);
+    }
   }
 
   async function injectOrCopyText(text, autoSend = false) {
@@ -580,13 +608,19 @@
         return;
       }
       const chars = Number(match.eligible_char_count || 0);
+      const totalChars = Number(b.uncompressed_char_count || 0);
+      const totalTurns = Number(match.total_turns || 0);
+      const totalK = totalChars >= 1000 ? `${(totalChars / 1000).toFixed(1)}K` : String(totalChars);
       const pct = Math.min(100, Math.round((chars / COMPACT_THRESHOLD_CHARS) * 100));
       bar.style.width = `${pct}%`;
       bar.classList.toggle("high", pct >= 85);
       const kText = chars >= 1000 ? `${(chars / 1000).toFixed(1)}K` : String(chars);
       txt.textContent = match.should_compact
-        ? `已达压缩阈值：${kText} / 150K 字（等待本机自动执行）`
-        : `保护区外：${kText} / 150K 字`;
+        ? `已存 ${totalTurns} 轮（${totalK} 字）· 保护区外 ${kText} / 150K 字（待自动压缩）`
+        : `已存 ${totalTurns} 轮（${totalK} 字）· 保护区外 ${kText} / 150K 字`;
+      if (totalTurns > 0) {
+        $("boundTurnBadge").textContent = `已同步 ${totalTurns} 轮 · ${totalK} 字`;
+      }
     } catch {
       txt.textContent = "压缩状态查询失败";
     }
@@ -889,16 +923,40 @@
       }
     });
 
+    function openBoundEditor(focusProject = false) {
+      const b = currentBinding();
+      if (!b) return;
+      $("editTitle").value = b.title || "";
+      $("editProject").value = b.project_id || "";
+      $("editRoleDesc").value = b.role_description || "";
+      $("chkEditAutoSend").checked = Boolean(b.auto_send_enabled);
+      const fold = $("boundSettingsFold");
+      if (fold) {
+        fold.open = true;
+        fold.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+      const target = focusProject ? $("editProject") : $("editTitle");
+      if (target) {
+        target.focus();
+        target.select();
+      }
+    }
+
+    $("btnOpenEditBinding").addEventListener("click", () => openBoundEditor(false));
+    $("boundProjectChip").addEventListener("click", () => openBoundEditor(true));
+
     // State C: Save updates or Unbind
     $("boundEditForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const b = currentBinding();
       if (!b) return;
+      const newTitle = $("editTitle").value.trim();
+      const newProject = $("editProject").value.trim().slice(0, 64);
       try {
         const saved = await Api.registerThread(state.settings, {
           planner_thread_id: b.planner_thread_id,
-          project_id: $("editProject").value.trim(),
-          title: $("editTitle").value.trim(),
+          project_id: newProject,
+          title: newTitle,
           role_description: $("editRoleDesc").value.trim(),
           chatgpt_conversation_id: b.chatgpt_conversation_id,
           chatgpt_url: state.activePageInfo?.url || b.chatgpt_url,
@@ -906,7 +964,17 @@
           auto_send_enabled: $("chkEditAutoSend").checked,
         });
         state.bindings[b.chatgpt_conversation_id] = saved;
-        await chrome.storage.local.set({ [STORAGE_KEYS.bindings]: state.bindings });
+        state.lastProject = newProject;
+        const urlHint =
+          state.activePageInfo?.projectHint || Helpers.parseProjectSlugFromUrl(saved.chatgpt_url);
+        if (urlHint?.rawGroupKey && newProject) {
+          state.projectGroupMap[urlHint.rawGroupKey] = newProject;
+        }
+        await chrome.storage.local.set({
+          [STORAGE_KEYS.bindings]: state.bindings,
+          [STORAGE_KEYS.lastProject]: state.lastProject,
+          [STORAGE_KEYS.projectGroupMap]: state.projectGroupMap,
+        });
         await chrome.runtime.sendMessage({ type: "TOWER_NOTIFY_TAB_BINDING" });
         $("boundSettingsFold").open = false;
         showToast("窗口设置已保存");

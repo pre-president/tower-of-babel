@@ -16,6 +16,7 @@
   let observer = null;
   let settleTimer = null;
   let lastTurnSignature = "";
+  let lastSameOriginFallbackTs = 0;
 
   function computeSignature(msgs) {
     if (!msgs || msgs.length === 0) return "0";
@@ -23,19 +24,48 @@
     return `${msgs.length}:${last.role}:${last.external_message_id}:${last.content.length}`;
   }
 
+  async function fallbackSameOriginSync(reason) {
+    if (!activeBinding || !activeBinding.sync_enabled || !currentConvId) return;
+    const now = Date.now();
+    if (reason !== "force" && now - lastSameOriginFallbackTs < 8000) return;
+    lastSameOriginFallbackTs = now;
+    try {
+      const hist = await fetchSameOriginHistory(currentConvId);
+      if (!hist || !hist.ok || !Array.isArray(hist.turns) || hist.turns.length === 0) return;
+      const tail = hist.turns.slice(-20);
+      const sig = computeSignature(tail);
+      if (reason !== "force" && sig === lastTurnSignature) return;
+      lastTurnSignature = sig;
+      chrome.runtime.sendMessage({
+        type: "TOWER_SYNC_BATCH",
+        payload: {
+          planner_thread_id: activeBinding.planner_thread_id,
+          source_platform: "chatgpt",
+          external_conversation_id: currentConvId,
+          messages: tail,
+        },
+        latestAssistantText:
+          [...tail].reverse().find((m) => m.role === "assistant")?.content || "",
+      });
+    } catch {
+      // Ignore transient background fetch error
+    }
+  }
+
   function syncVisibleNow(reason = "manual") {
     if (!activeBinding || !activeBinding.sync_enabled) {
       return { ok: false, reason: "NOT_WHITELISTED" };
     }
     const messages = Dom.extractVisibleMessages(document);
+    if (messages.length === 0) {
+      fallbackSameOriginSync(reason);
+      return { ok: true, count: 0, fallbackPending: true };
+    }
     const sig = computeSignature(messages);
     if (reason !== "force" && sig === lastTurnSignature) {
       return { ok: true, skipped: true, count: messages.length };
     }
     lastTurnSignature = sig;
-    if (messages.length === 0) {
-      return { ok: true, count: 0 };
-    }
     chrome.runtime.sendMessage({
       type: "TOWER_SYNC_BATCH",
       payload: {

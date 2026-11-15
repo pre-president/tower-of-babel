@@ -1,4 +1,4 @@
-# Tower of Babel — Chrome Extension (Chat Bridge v0.3.2)
+# Tower of Babel — Chrome Extension (Chat Bridge v0.3.3)
 
 No Chrome Web Store publishing or build step required. Load directly via Chrome Developer Mode:
 

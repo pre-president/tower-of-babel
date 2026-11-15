@@ -467,6 +467,19 @@ textarea:focus {
   color: var(--text-secondary);
 }
 
+.chip-btn {
+  cursor: pointer;
+  border-color: var(--border);
+  font-family: inherit;
+  transition: all 0.12s ease;
+}
+
+.chip-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
 .chip-muted {
   background: #f1f5f9;
   color: var(--muted);
