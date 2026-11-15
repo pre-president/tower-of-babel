@@ -9,11 +9,36 @@
   }
   root.TowerHistoryTree = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
+  const ALLOWED_CONTENT_TYPES = new Set(["text", "multimodal_text"]);
+
+  function isVisibleDialogueMessage(msg) {
+    if (!msg) return false;
+    if (msg.metadata && msg.metadata.is_visually_hidden_from_conversation) return false;
+
+    const role = msg.author && msg.author.role;
+    if (role !== "user" && role !== "assistant") return false;
+
+    // Exclude internal ChatGPT tool calls (python, file_search, web, browser, canmore, etc.)
+    if (typeof msg.recipient === "string" && msg.recipient.trim() !== "" && msg.recipient !== "all") {
+      return false;
+    }
+    // Exclude hidden reasoning commentary preambles before final reply
+    if (typeof msg.channel === "string" && msg.channel.trim() !== "" && msg.channel !== "final") {
+      return false;
+    }
+    const ct = msg.content && msg.content.content_type;
+    if (typeof ct === "string" && ct.trim() !== "" && !ALLOWED_CONTENT_TYPES.has(ct)) {
+      return false;
+    }
+    return true;
+  }
+
   function extractPartsText(message) {
     if (!message || !message.content) return "";
     const content = message.content;
 
-    if (content.content_type === "thoughts") {
+    const ct = content.content_type;
+    if (typeof ct === "string" && ct.trim() !== "" && !ALLOWED_CONTENT_TYPES.has(ct)) {
       return "";
     }
     if (typeof content.text === "string" && content.text.trim()) {
@@ -61,10 +86,8 @@
     const turns = [];
     for (const node of chain) {
       const msg = node && node.message;
-      if (!msg) continue;
-      if (msg.metadata && msg.metadata.is_visually_hidden_from_conversation) continue;
+      if (!isVisibleDialogueMessage(msg)) continue;
       const role = msg.author && msg.author.role;
-      if (role !== "user" && role !== "assistant") continue;
       const text = extractPartsText(msg);
       if (!text) continue;
 

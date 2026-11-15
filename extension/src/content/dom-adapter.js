@@ -148,6 +148,9 @@
   function resolveMessageRole(el) {
     const direct = getAttr(el, "data-message-author-role") || getAttr(el, "data-turn");
     if (direct === "user" || direct === "assistant") return direct;
+    const aria = getAttr(el, "aria-label") || "";
+    if (/you said|你说/i.test(aria)) return "user";
+    if (/chatgpt said|chatgpt/i.test(aria)) return "assistant";
     if (typeof el.querySelector === "function") {
       const nestedRole = el.querySelector("[data-message-author-role], [data-turn]");
       if (nestedRole) {
@@ -155,7 +158,7 @@
           getAttr(nestedRole, "data-message-author-role") || getAttr(nestedRole, "data-turn");
         if (r === "user" || r === "assistant") return r;
       }
-      const srHeading = el.querySelector("h5, h6");
+      const srHeading = el.querySelector("h4, h5, h6, .sr-only, [class*='sr-only']");
       const headingTxt = (srHeading && srHeading.textContent) || "";
       if (/you said|你说/i.test(headingTxt)) return "user";
       if (/chatgpt said|chatgpt/i.test(headingTxt)) return "assistant";

@@ -315,3 +315,70 @@ test("DOM adapter falls back to [data-turn] and table serialization when needed"
   assert.equal(turns[1].role, "assistant");
   assert.ok(turns[1].content.includes("| T08 | AR更新 |"));
 });
+
+test("History tree filters internal python/file_search/commentary tool calls", () => {
+  const conv = {
+    current_node: "final",
+    mapping: {
+      root: { id: "root", parent: null, message: null },
+      u1: {
+        id: "u1",
+        parent: "root",
+        message: {
+          id: "mu1",
+          author: { role: "user" },
+          recipient: "all",
+          content: { content_type: "multimodal_text", parts: [{ text: "请列出待办" }] },
+        },
+      },
+      py: {
+        id: "py",
+        parent: "u1",
+        message: {
+          id: "mpy",
+          author: { role: "assistant" },
+          recipient: "python",
+          content: { content_type: "code", text: "from pathlib import Path" },
+        },
+      },
+      fs: {
+        id: "fs",
+        parent: "py",
+        message: {
+          id: "mfs",
+          author: { role: "assistant" },
+          recipient: "file_search",
+          content: { content_type: "code", text: '{"path":"/files/search"}' },
+        },
+      },
+      cmt: {
+        id: "cmt",
+        parent: "fs",
+        message: {
+          id: "mcmt",
+          author: { role: "assistant" },
+          recipient: "all",
+          channel: "commentary",
+          content: { content_type: "text", parts: ["Checking files..."] },
+        },
+      },
+      final: {
+        id: "final",
+        parent: "cmt",
+        message: {
+          id: "mfinal",
+          author: { role: "assistant" },
+          recipient: "all",
+          channel: "final",
+          content: { content_type: "text", parts: ["已经整理好待办清单"] },
+        },
+      },
+    },
+  };
+  const turns = Tree.linearizeConversation(conv);
+  assert.equal(turns.length, 2);
+  assert.equal(turns[0].role, "user");
+  assert.equal(turns[0].content, "请列出待办");
+  assert.equal(turns[1].role, "assistant");
+  assert.equal(turns[1].content, "已经整理好待办清单");
+});

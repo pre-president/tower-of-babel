@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tower of Babel — Chat Bridge",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Whitelist-only ChatGPT planning bridge, incremental dialogue sync, decision manager, and guarded question queue for Tower of Babel.",
   "icons": {
     "16": "assets/icon16.png",
