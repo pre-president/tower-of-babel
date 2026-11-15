@@ -45,7 +45,7 @@ def test_summarizer_discovery_and_zero_secret_leak(
         claude_settings_path=claude_cfg,
     )
     assert cfg.protocol == "anthropic"
-    assert cfg.model == "deepseek-v4.1-flash[1M]"
+    assert cfg.model == "deepseek-v4.1-flash"
     assert cfg.api_key == "anth-super-secret-value-12345"
 
     # Zero-secret guarantee in repr() and status_dict()

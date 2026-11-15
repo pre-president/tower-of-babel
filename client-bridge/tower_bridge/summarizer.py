@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,11 @@ def _infer_protocol(protocol: str | None, base_url: str) -> str:
     if "openai" in low or low.endswith("/chat/completions"):
         return "openai"
     return "anthropic"
+
+
+def _normalize_wire_model(model: str) -> str:
+    """Strip Claude Code UI context suffixes like '[1M]' to obtain the wire model ID."""
+    return re.sub(r"\[[^\]]+\]$", "", model.strip()).strip()
 
 
 def resolve_endpoint(base_url: str, protocol: str) -> str:
@@ -128,7 +134,9 @@ class SummarizerConfig:
         if explicit_key or explicit_url:
             base_url = explicit_url or "https://api.deepseek.com"
             protocol = _infer_protocol(explicit_proto or ("openai" if "deepseek.com" in base_url else None), base_url)
-            model = explicit_model or ("deepseek-chat" if protocol == "openai" else "deepseek-v4.1-flash[1M]")
+            model = _normalize_wire_model(
+                explicit_model or ("deepseek-chat" if protocol == "openai" else "deepseek-v4.1-flash")
+            )
             source = "env/summarizer.env"
             api_key = explicit_key
         elif claude_env:
@@ -137,18 +145,22 @@ class SummarizerConfig:
                 claude_env.get("ANTHROPIC_AUTH_TOKEN", "").strip()
                 or claude_env.get("ANTHROPIC_API_KEY", "").strip()
             )
-            model = (
+            raw_model = (
                 explicit_model
+                or claude_env.get("ANTHROPIC_DEFAULT_SONNET_MODEL_NAME", "").strip()
+                or claude_env.get("ANTHROPIC_DEFAULT_OPUS_MODEL_NAME", "").strip()
+                or claude_env.get("CLAUDE_CODE_SUBAGENT_MODEL", "").strip()
                 or claude_env.get("ANTHROPIC_MODEL", "").strip()
                 or claude_env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "").strip()
-                or "deepseek-v4.1-flash[1M]"
+                or "deepseek-v4.1-flash"
             )
+            model = _normalize_wire_model(raw_model)
             protocol = _infer_protocol(explicit_proto or "anthropic", base_url)
             source = str(claude_path)
         else:
             base_url = "https://api.deepseek.com"
             protocol = _infer_protocol(explicit_proto or "openai", base_url)
-            model = explicit_model or "deepseek-chat"
+            model = _normalize_wire_model(explicit_model or "deepseek-chat")
             api_key = ""
             source = "unconfigured"
 
@@ -254,6 +266,11 @@ def summarize_batch(
         "Accept": "application/json",
         "User-Agent": "tower-of-babel-compactor/0.4",
     }
+    if "opencode.ai" in endpoint.lower():
+        # OpenCode Zen/Go requires a stable per-thread session header for prompt caching & routing.
+        headers["x-opencode-session"] = f"tower-{planner_thread_id}"
+
+    wire_model = _normalize_wire_model(config.model)
 
     if config.protocol == "anthropic":
         headers["anthropic-version"] = "2023-06-01"
@@ -261,7 +278,7 @@ def summarize_batch(
         if "api.anthropic.com" not in endpoint.lower():
             headers["Authorization"] = f"Bearer {config.api_key}"
         body: dict[str, Any] = {
-            "model": config.model,
+            "model": wire_model,
             "max_tokens": config.max_output_tokens,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_prompt}],
@@ -270,7 +287,7 @@ def summarize_batch(
     else:
         headers["Authorization"] = f"Bearer {config.api_key}"
         body = {
-            "model": config.model,
+            "model": wire_model,
             "max_tokens": config.max_output_tokens,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
