@@ -147,7 +147,7 @@ async function checkAndAutoSendForOpenTabs() {
 
 chrome.runtime.onInstalled.addListener(() => {
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => { });
   }
   chrome.alarms.create("tower_hub_tick", { periodInMinutes: 1 });
 });
@@ -216,7 +216,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.tabs.query({ url: ["https://chatgpt.com/*"] }).then(async (tabs) => {
       for (const tab of tabs) {
         if (tab.id) {
-          sendToTabWithInject(tab.id, tab.url, { type: "TOWER_BINDING_UPDATED" }).catch(() => {});
+          sendToTabWithInject(tab.id, tab.url, { type: "TOWER_BINDING_UPDATED" }).catch(() => { });
         }
       }
       sendResponse({ ok: true });

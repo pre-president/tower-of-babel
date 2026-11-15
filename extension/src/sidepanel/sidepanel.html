@@ -41,14 +41,14 @@
   </header>
 
   <main>
-    <!-- Setup Reminder Banner (hidden once Bridge Token is set) -->
+    <!-- Setup / Auth Reminder Banner -->
     <div id="tokenReminder" class="notice-card notice-warn hidden">
       <div class="row-between">
         <div>
-          <strong>尚未配置 Bridge Token</strong>
-          <p class="meta">填入一次本机 Token 即可开始同步与管理决策</p>
+          <strong id="tokenReminderTitle">尚未配置 Bridge Token</strong>
+          <p id="tokenReminderDesc" class="meta">填入一次本机 Token 即可开始同步与管理决策</p>
         </div>
-        <button id="btnGoSettings" type="button" class="btn btn-sm btn-primary">去填写</button>
+        <button id="btnGoSettings" type="button" class="btn btn-sm btn-primary">去设置</button>
       </div>
     </div>
 
@@ -286,6 +286,7 @@
               <input id="inputBridgeToken" type="password" placeholder="粘贴 TOWER_BRIDGE_TOKEN" required />
               <button id="btnToggleTokenVis" type="button" class="btn btn-sm" title="显示/隐藏 Token">👁</button>
             </div>
+            <span class="meta">可在 <code>~/.tower-of-babel/credentials.env</code> 中找到 <code>TOWER_BRIDGE_TOKEN=</code> 后的值（直接粘贴整行也可自动识别）</span>
           </label>
           <button type="submit" id="btnSaveAndTest" class="btn btn-primary btn-block">保存并验证连通</button>
         </form>

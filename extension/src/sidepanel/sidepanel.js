@@ -31,9 +31,11 @@
     globalKillSwitch: false,
     projectGroupMap: {},
     lastProject: "",
+    authState: "unknown",
     activeTabId: null,
     activePageInfo: null,
     lastRenderedConvId: null,
+    lastScriptError: "",
   };
 
   let toastTimer = null;
@@ -92,7 +94,34 @@
     $("globalKillSwitch").checked = state.globalKillSwitch;
     updateKillSwitchVisual();
     $("retryQueueCount").textContent = String(state.retryQueue.length);
-    $("tokenReminder").classList.toggle("hidden", Boolean(state.settings.bridgeToken));
+    if (!Api.normalizeToken(state.settings.bridgeToken)) {
+      state.authState = "missing_token";
+    }
+    updateTokenReminder();
+  }
+
+  function updateTokenReminder() {
+    const banner = $("tokenReminder");
+    const title = $("tokenReminderTitle");
+    const desc = $("tokenReminderDesc");
+    if (!banner || !title || !desc) return;
+
+    if (state.authState === "missing_token" || !Api.normalizeToken(state.settings.bridgeToken)) {
+      title.textContent = "尚未配置 Bridge Token";
+      desc.textContent = "在「工作台与设置」填入 TOWER_BRIDGE_TOKEN 即可开始同步。";
+      banner.classList.remove("hidden");
+    } else if (state.authState === "invalid_token") {
+      title.textContent = "当前 Bridge Token 无效（401）";
+      desc.textContent =
+        "请勿填入 Agent / DeepSeek Key；请从 ~/.tower-of-babel/credentials.env 复制 TOWER_BRIDGE_TOKEN 并保存。";
+      banner.classList.remove("hidden");
+    } else if (state.authState === "forbidden_role") {
+      title.textContent = "Token 权限不匹配（403）";
+      desc.textContent = "当前填写的是执行端 Agent Token，请改填 TOWER_BRIDGE_TOKEN。";
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
   }
 
   function updateKillSwitchVisual() {
@@ -103,17 +132,26 @@
     lbl.textContent = state.globalKillSwitch ? "已急停" : "急停";
   }
 
+  function isChatGptUrl(url) {
+    return Boolean(
+      url && (url.startsWith("https://chatgpt.com") || url.startsWith("https://chat.openai.com"))
+    );
+  }
+
   async function sendTabMessageWithAutoInject(tabId, tabUrl, msg) {
+    state.lastScriptError = "";
     try {
       return await chrome.tabs.sendMessage(tabId, msg);
     } catch {
-      if (!tabUrl || !tabUrl.startsWith("https://chatgpt.com") || !chrome.scripting) {
+      if (!isChatGptUrl(tabUrl) || !chrome.scripting) {
+        state.lastScriptError = "scripting_unavailable";
         return null;
       }
       try {
         await chrome.scripting.executeScript({ target: { tabId }, files: CONTENT_FILES });
         return await chrome.tabs.sendMessage(tabId, msg);
-      } catch {
+      } catch (err) {
+        state.lastScriptError = err && err.message ? err.message : String(err);
         return null;
       }
     }
@@ -121,7 +159,7 @@
 
   async function getActiveChatGptTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.id || !tab.url || !tab.url.startsWith("https://chatgpt.com")) {
+    if (!tab || !tab.id || !isChatGptUrl(tab.url)) {
       state.activeTabId = null;
       state.activePageInfo = tab && tab.url ? { isChatGpt: false, url: tab.url } : null;
       return null;
@@ -138,6 +176,8 @@
     if (live) {
       state.activePageInfo = {
         isChatGpt: true,
+        scriptConnected: true,
+        scriptError: "",
         ...live,
         conversationId: live.conversationId || urlConvId,
         title: Helpers.cleanChatTitle(live.title) || fallbackTitle,
@@ -147,6 +187,8 @@
     } else {
       state.activePageInfo = {
         isChatGpt: true,
+        scriptConnected: false,
+        scriptError: state.lastScriptError || "no_content_script",
         conversationId: urlConvId,
         title: fallbackTitle,
         url: tab.url,
@@ -165,20 +207,25 @@
   async function checkHubHealthAndSyncThreads() {
     const pill = $("hubStatusBtn");
     const txt = $("hubStatusText");
-    if (!state.settings.bridgeToken) {
+    if (!Api.normalizeToken(state.settings.bridgeToken)) {
+      state.authState = "missing_token";
       pill.className = "status-pill status-warn";
       txt.textContent = "需配置 Token";
+      updateTokenReminder();
       return;
     }
     try {
       const h = await Api.health(state.settings);
       if (!h || h.database !== "connected") {
+        state.authState = "offline";
         pill.className = "status-pill status-muted";
         txt.textContent = "Hub 异常";
+        updateTokenReminder();
         return;
       }
       const threads = await Api.listThreads(state.settings);
       state.hubThreads = Array.isArray(threads) ? threads : [];
+      state.authState = "ok";
       // Keep local bindings aligned with server truth without erasing unpushed toggles
       let changed = false;
       for (const t of state.hubThreads) {
@@ -200,14 +247,22 @@
       }
       pill.className = "status-pill status-ok";
       txt.textContent = "Hub 在线";
+      updateTokenReminder();
     } catch (err) {
-      if (String(err).includes("401") || String(err).includes("403")) {
+      if (err && err.statusCode === 403) {
+        state.authState = "forbidden_role";
+        pill.className = "status-pill status-warn";
+        txt.textContent = "需 Bridge Token";
+      } else if (err?.statusCode === 401 || String(err).includes("401")) {
+        state.authState = "invalid_token";
         pill.className = "status-pill status-warn";
         txt.textContent = "Token 无效";
       } else {
+        state.authState = "offline";
         pill.className = "status-pill status-muted";
         txt.textContent = "离线";
       }
+      updateTokenReminder();
     }
   }
 
@@ -333,7 +388,11 @@
 
       const convChanged = state.lastRenderedConvId !== `unbound:${cid}`;
       state.lastRenderedConvId = `unbound:${cid}`;
-      $("unboundMsgCount").textContent = `当前可见 ${info.turnCount || 0} 条消息`;
+      $("unboundMsgCount").textContent = !info.scriptConnected
+        ? "未连上页面脚本 · 请刷新本标签页"
+        : info.turnCount > 0
+          ? `当前可见 ${info.turnCount} 条消息`
+          : "已连接页面 · 将尝试同源读取历史";
 
       if (convChanged) {
         $("quickTitle").value = info.title || "未命名科研对话";
@@ -365,7 +424,9 @@
     $("boundTitleDisplay").textContent = b.title || info.title || b.planner_thread_id;
     $("boundProjectChip").textContent = b.project_id || "未分组";
     $("boundThreadIdText").textContent = b.planner_thread_id;
-    $("boundTurnBadge").textContent = `页面可见 ${info.turnCount || 0} 轮`;
+    $("boundTurnBadge").textContent = !info.scriptConnected
+      ? "页面未连接 · 请刷新网页"
+      : `页面可见 ${info.turnCount || 0} 轮`;
 
     $("editTitle").value = b.title || "";
     $("editProject").value = b.project_id || "";
@@ -697,8 +758,14 @@
       tabBtn.addEventListener("click", () => switchTab(tabBtn.dataset.tab));
     });
 
-    $("hubStatusBtn").addEventListener("click", () => switchTab("hub"));
-    $("btnGoSettings").addEventListener("click", () => switchTab("hub"));
+    $("hubStatusBtn").addEventListener("click", () => {
+      switchTab("hub");
+      if (state.authState !== "ok") $("inputBridgeToken")?.focus();
+    });
+    $("btnGoSettings").addEventListener("click", () => {
+      switchTab("hub");
+      $("inputBridgeToken")?.focus();
+    });
     $("btnJumpAllThreads").addEventListener("click", () => switchTab("hub"));
     $("btnOpenChatGpt").addEventListener("click", () => {
       chrome.tabs.create({ url: "https://chatgpt.com/" });
@@ -726,19 +793,21 @@
       const btn = $("btnSaveAndTest");
       btn.disabled = true;
       try {
+        const cleanToken = Api.normalizeToken($("inputBridgeToken").value);
+        $("inputBridgeToken").value = cleanToken;
         state.settings = {
           hubUrl: $("inputHubUrl").value.trim().replace(/\/+$/, ""),
-          bridgeToken: $("inputBridgeToken").value.trim(),
+          bridgeToken: cleanToken,
         };
         await chrome.storage.local.set({ [STORAGE_KEYS.settings]: state.settings });
         await Api.listThreads(state.settings);
         await refreshAllWorkspace();
         $("settingsStatusMsg").textContent = "验证成功，已保存并连通 Hub。";
-        showToast("Hub 连接验证通过");
+        showToast("Hub 连接验证通过，可返回「当前窗口」一键绑定");
       } catch (err) {
         $("settingsStatusMsg").textContent = `连接失败：${err}`;
         await checkHubHealthAndSyncThreads();
-        showToast("Token 或网络验证失败", true);
+        showToast("Token 或网络验证失败，请核对 TOWER_BRIDGE_TOKEN", true);
       } finally {
         btn.disabled = false;
       }
@@ -754,14 +823,20 @@
         showToast("未检测到对话 UUID，请确认位于具体对话页", true);
         return;
       }
-      if (!state.settings.bridgeToken) {
+      if (
+        !Api.normalizeToken(state.settings.bridgeToken) ||
+        state.authState === "invalid_token" ||
+        state.authState === "forbidden_role"
+      ) {
         switchTab("hub");
-        showToast("请先填写 Bridge Token", true);
+        $("inputBridgeToken")?.focus();
+        $("inputBridgeToken")?.select();
+        showToast("当前 Bridge Token 无效或未配置，请重新粘贴 TOWER_BRIDGE_TOKEN 后保存", true);
         return;
       }
 
       const title = $("quickTitle").value.trim();
-      const project = $("quickProject").value.trim();
+      const project = $("quickProject").value.trim().slice(0, 64);
       const customTid = $("quickThreadId").value.trim();
       if (customTid && !/^[A-Za-z0-9_-]{2,64}$/.test(customTid)) {
         showToast("自定义窗口 ID 只能包含字母、数字、下划线或短横线", true);

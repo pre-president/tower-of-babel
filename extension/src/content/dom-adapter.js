@@ -11,9 +11,12 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
   const SELECTORS = {
     messageRoleNode: "[data-message-author-role]",
+    turnRoleFallback: '[data-turn="user"], [data-turn="assistant"]',
+    turnArticleFallback: 'article[data-testid^="conversation-turn-"]',
     promptInputs: [
       "#prompt-textarea",
       'div[contenteditable="true"][id="prompt-textarea"]',
+      'div.ProseMirror[contenteditable="true"]',
       'textarea[data-id="root"]',
       'div[contenteditable="true"][data-placeholder]',
     ],
@@ -115,6 +118,21 @@
     if (tag === "ul" || tag === "ol") {
       return `${inner}\n`;
     }
+    if (tag === "tr") {
+      const cells = children
+        .filter((c) => {
+          const ct = String(c.tagName || "").toLowerCase();
+          return ct === "td" || ct === "th";
+        })
+        .map((c) => serializeNodeToMarkdown(c).replace(/\s+/g, " ").trim());
+      if (cells.length > 0) {
+        return `| ${cells.join(" | ")} |\n`;
+      }
+      return inner.trim() ? `${inner.trim()}\n` : "";
+    }
+    if (tag === "table") {
+      return inner.trim() ? `\n${inner.trim()}\n\n` : "";
+    }
     if (/^h[1-6]$/.test(tag)) {
       const lvl = "#".repeat(Number(tag[1]));
       return inner.trim() ? `\n${lvl} ${inner.trim()}\n\n` : "";
@@ -126,17 +144,42 @@
     return inner;
   }
 
+  function resolveMessageRole(el) {
+    const direct = getAttr(el, "data-message-author-role") || getAttr(el, "data-turn");
+    if (direct === "user" || direct === "assistant") return direct;
+    if (typeof el.querySelector === "function") {
+      const nestedRole = el.querySelector("[data-message-author-role], [data-turn]");
+      if (nestedRole) {
+        const r =
+          getAttr(nestedRole, "data-message-author-role") || getAttr(nestedRole, "data-turn");
+        if (r === "user" || r === "assistant") return r;
+      }
+      const srHeading = el.querySelector("h5, h6");
+      const headingTxt = (srHeading && srHeading.textContent) || "";
+      if (/you said|你说/i.test(headingTxt)) return "user";
+      if (/chatgpt said|chatgpt/i.test(headingTxt)) return "assistant";
+    }
+    return null;
+  }
+
   function extractVisibleMessages(doc) {
     if (!doc || typeof doc.querySelectorAll !== "function") return [];
-    const nodes = Array.from(doc.querySelectorAll(SELECTORS.messageRoleNode));
+    let nodes = Array.from(doc.querySelectorAll(SELECTORS.messageRoleNode));
+    if (nodes.length === 0) {
+      nodes = Array.from(doc.querySelectorAll(SELECTORS.turnRoleFallback));
+    }
+    if (nodes.length === 0) {
+      nodes = Array.from(doc.querySelectorAll(SELECTORS.turnArticleFallback));
+    }
     const out = [];
     for (let i = 0; i < nodes.length; i += 1) {
       const el = nodes[i];
-      const role = getAttr(el, "data-message-author-role");
+      const role = resolveMessageRole(el);
       if (role !== "user" && role !== "assistant") continue;
       const content = serializeNodeToMarkdown(el).replace(/\n{3,}/g, "\n\n").trim();
       if (!content) continue;
-      const extId = getAttr(el, "data-message-id") || `dom_${i}_${role}`;
+      const extId =
+        getAttr(el, "data-message-id") || getAttr(el, "data-testid") || `dom_${i}_${role}`;
       out.push({
         role,
         content,

@@ -269,3 +269,49 @@ test("Sidepanel JS element IDs all exist in sidepanel.html", () => {
   }
   assert.deepEqual(missing, []);
 });
+
+test("Api.normalizeToken cleans prefixes, quotes, and whitespace", () => {
+  assert.equal(Api.normalizeToken("  abc-123  \n"), "abc-123");
+  assert.equal(Api.normalizeToken("Bearer abc-123"), "abc-123");
+  assert.equal(Api.normalizeToken("TOWER_BRIDGE_TOKEN=\"abc-123\""), "abc-123");
+  assert.equal(Api.normalizeToken("TOWER_BRIDGE_TOKEN= 'Bearer abc-123'"), "abc-123");
+});
+
+test("DOM adapter falls back to [data-turn] and table serialization when needed", () => {
+  const tableNode = makeNode({
+    tagName: "TABLE",
+    childNodes: [
+      makeNode({
+        tagName: "TR",
+        childNodes: [
+          makeNode({ tagName: "TD", childNodes: [makeNode({ nodeType: 3, textContent: "T08" })] }),
+          makeNode({ tagName: "TD", childNodes: [makeNode({ nodeType: 3, textContent: "AR更新" })] }),
+        ],
+      }),
+    ],
+  });
+  const doc = {
+    querySelectorAll(sel) {
+      if (sel === "[data-message-author-role]") return [];
+      if (sel.includes("data-turn")) {
+        return [
+          makeNode({
+            attrs: { "data-turn": "user", "data-testid": "turn-1" },
+            childNodes: [makeNode({ nodeType: 3, textContent: "请汇报进度" })],
+          }),
+          makeNode({
+            attrs: { "data-turn": "assistant", "data-testid": "turn-2" },
+            childNodes: [tableNode],
+          }),
+        ];
+      }
+      return [];
+    },
+  };
+  const turns = Dom.extractVisibleMessages(doc);
+  assert.equal(turns.length, 2);
+  assert.equal(turns[0].role, "user");
+  assert.equal(turns[0].content, "请汇报进度");
+  assert.equal(turns[1].role, "assistant");
+  assert.ok(turns[1].content.includes("| T08 | AR更新 |"));
+});

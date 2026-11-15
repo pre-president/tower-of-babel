@@ -8,12 +8,30 @@
   }
   root.TowerApiClient = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
+  function normalizeToken(raw) {
+    let s = String(raw || "").trim();
+    if (/^TOWER_BRIDGE_TOKEN\s*=/i.test(s)) {
+      s = s.replace(/^TOWER_BRIDGE_TOKEN\s*=/i, "").trim();
+    }
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    if (/^Bearer\s+/i.test(s)) {
+      s = s.replace(/^Bearer\s+/i, "").trim();
+    }
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    return s;
+  }
+
   async function request(settings, method, path, body = null) {
     const base = String(settings.hubUrl || "https://hub.atmosphericduct.xyz").replace(/\/+$/, "");
     const url = `${base}${path}`;
     const headers = { "Content-Type": "application/json" };
-    if (settings.bridgeToken) {
-      headers.Authorization = `Bearer ${settings.bridgeToken}`;
+    const cleanToken = normalizeToken(settings.bridgeToken);
+    if (cleanToken) {
+      headers.Authorization = `Bearer ${cleanToken}`;
     }
     const resp = await fetch(url, {
       method,
@@ -37,6 +55,7 @@
   }
 
   return {
+    normalizeToken,
     health: (s) => request(s, "GET", "/health"),
     listThreads: (s) => request(s, "GET", "/api/v1/bridge/threads"),
     registerThread: (s, payload) => request(s, "POST", "/api/v1/bridge/threads/register", payload),
