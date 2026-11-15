@@ -1,0 +1,42 @@
+# Local / Self-Hosted Quickstart for Tower of Babel (PostgreSQL + Central Hub)
+# Usage:
+#   cp server/.env.example server/.env   # edit tokens locally
+#   docker compose up --build -d
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tower_hub
+      POSTGRES_USER: tower_hub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tower_dev_password_change_me}
+    volumes:
+      - tower_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tower_hub -d tower_hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  hub:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8100:8100"
+    environment:
+      TOWER_ENV: ${TOWER_ENV:-local}
+      DATABASE_URL: postgresql+psycopg://tower_hub:${POSTGRES_PASSWORD:-tower_dev_password_change_me}@postgres:5432/tower_hub
+      TOWER_BRIDGE_TOKEN: ${TOWER_BRIDGE_TOKEN:-dev-bridge-token-change-me}
+      TOWER_AGENT_TOKEN_GEMINI: ${TOWER_AGENT_TOKEN_GEMINI:-dev-gemini-token-change-me}
+      TOWER_AGENT_TOKEN_DEEPSEEK: ${TOWER_AGENT_TOKEN_DEEPSEEK:-dev-deepseek-token-change-me}
+      TOWER_AGENT_TOKEN_GPT: ${TOWER_AGENT_TOKEN_GPT:-dev-gpt-token-change-me}
+      TOWER_SUMMARIZER_ACTORS: ${TOWER_SUMMARIZER_ACTORS:-deepseek}
+
+volumes:
+  tower_pgdata:

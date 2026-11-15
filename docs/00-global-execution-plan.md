@@ -38,7 +38,7 @@
 
 ---
 
-### Stage 2（Phase 2）：MCP Server 与本地三端模型接力实测
+### Stage 2（Phase 2）：MCP Server 与本地三端模型接力实测 — **✅ 已完成并验收上线（2026-11-15）**
 **目标**：让 **Gemini（Antigravity）/ DeepSeek（Claude Code）/ GPT（Codex）** 真正打通，能用 Chat 名直接开工、并实现**带最近 ~10 轮执行现场与 `git diff` 的无缝交接**。
 1. **服务端 `/mcp` 挂载**（`server/app/mcp/`）：
    - 在同一个 FastAPI 进程内挂载标准 MCP（Streamable HTTP + 兼容 SSE），直接复用 Stage 1 鉴权与业务层，不增加第二个后台进程。
@@ -57,7 +57,7 @@
 
 ---
 
-### Stage 3（Phase 4 提前或并行：Chrome Extension Chat Bridge）
+### Stage 3（Phase 4 提前或并行：Chrome Extension Chat Bridge） — **✅ 已完成并待浏览器加载实测（2026-11-15）**
 **目标**：打通浏览器端 `chatgpt.com` 右侧边栏与增量自动同步、问题队列及可选自动发送。
 1. **本地开发者模式加载（无需应用商店上架）**：
    - Manifest V3 + `sidePanel` + `storage` + `activeTab`（仅限 `chatgpt.com` 与 `hub.atmosphericduct.xyz`）。
@@ -71,17 +71,17 @@
 
 ---
 
-### Stage 4（Phase 3 收尾增强：DeepSeek 1M 滚动压缩 + 可选 OSS）
+### Stage 4（Phase 3 收尾增强：DeepSeek 1M 滚动压缩 + 可选 OSS） — **✅ 已完成本机 DeepSeek 1M 压缩方案并验证（2026-11-15）**
 **目标**：解决长期运行上百轮/几十万字后的记忆体积与成本控制。
-1. **DeepSeek 1M 滚动压缩任务**：
-   - 保护区：每个窗口最新 20 轮原文不动；
-   - 触发器：更早未压缩原文累计达到 `150K–250K` 字符（或手动点击“立即压缩”），调用 DeepSeek API（密钥仅从 `.env` 读取）将其压为 `4K–6K` 字结构化 `thread_digest`；原文永不删。
-2. **可选 OSS 挂载（若后续有需求）**：
-   - 按需在阿里云绑定最小权限 ECS RAM 角色（禁用 `/permanent/` 删除），对接附件托管与异地备份。
+1. **DeepSeek 1M 滚动压缩任务**（已采用“密钥零上云”的本机触发架构）：
+   - 保护区：每个窗口最新 20 轮原文不动（服务端强制 409 拦截越界覆盖与区间重叠）；
+   - 触发器：更早未压缩原文累计达到 `150K–250K` 字符（或手动运行 `tower-compact run --force`），由本机 Windows CLI `client-bridge/tower_bridge/compact_cli.py` 调用本地配置的 DeepSeek API（自动发现 `~/.claude/settings.json` 或 `~/.tower-of-babel/summarizer.env`，支持 Anthropic `/v1/messages` 与 OpenAI `/v1/chat/completions` 格式）将其压为 `4K–6K` 字结构化 `thread_digest` 后回传 Hub；原文永不删。
+2. **可选 OSS 挂载（按需预留）**：
+   - `artifacts` 表已支持 `kind="oss_object"` 扩展字段，个人轻量科研阶段维持本地磁盘与 Git 指针策略，暂不引入额外存储费用。
 
 ---
 
-### Stage 5（总验收与 GitHub 开源完善）
-1. 执行全链路 14 项验收（多窗口隔离、决策换代、三端切换、额度耗尽模拟、服务器重启自启、数据库 `pg_dump` 恢复演练）。
-2. 为开源社区补齐低门槛试用包（可选 `Dockerfile` / `docker-compose.yml` + SQLite 零配置快速启动模式），同时保留生产轻量原生方案。
-3. 运行自动化脱敏检查脚本（确认零密钥、零私密日志、`.env.example` 完整、文档与 `AGENTS.md` 齐备），更新 GitHub 仓库最终发布版。
+### Stage 5（总验收与 GitHub 开源完善） — **✅ 已完成 14 项验收、容灾演练与开源容器化（2026-11-15）**
+1. 已完成全链路 **14 项自动化验收测试**（`server/tests/test_stage5_acceptance.py`，覆盖多窗口隔离、决策换代、三端切换、额度耗尽模拟、Alembic 迁移与重启持久化等），服务端 24/24、客户端桥接 8/8、Chrome 扩展 6/6 全绿通过。
+2. 已在阿里云实测 `systemctl restart tower-hub` 自启恢复、`pg_dump` 每日脚本导出一份新备份并在隔离临时库 `tower_hub_restore_check` 完成 10 表无损恢复演练与清理，同时确认 `atmosphericduct.xyz` 零影响。
+3. 已补齐开源低门槛试用包（`server/Dockerfile` + 根目录 `docker-compose.yml` + SQLite 零配置快速启动模式），完成全仓静态密钥扫描（零泄漏）与文档齐备更新。

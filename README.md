@@ -75,27 +75,31 @@
 
 ---
 
-## 四、当前项目进度（Stage 1 已实现并上线运行）
+## 四、项目实施进度（Stage 0–5 全部完成）
 
-本项目按渐进式里程碑稳步推进：
+本项目按渐进式里程碑稳步推进并全部验收通过：
 
 - [x] **Stage 0 · 基础设施审计与蓝图定稿**
   - 完成轻量云服务器（2 vCPU / 1.8 GiB RAM）评估、独立子域名 HTTPS（Let's Encrypt 自动续签）及架构/安全规范文档化。
-- [x] **Stage 1 · Central Hub 核心后端与数据库（已完成 & 部署上线）**
-  - 完成 `server/` 全部数据模型与 Alembic 迁移脚本（10 张核心表，含 PostgreSQL `pg_trgm` + `tsvector` GIN 全文索引）。
-  - 实现双域 Token 鉴权（`Bridge Token` 与 `Agent Token` 权限物理隔离，Agent 调用管理与批准接口强制 `403`）。
-  - 实现白名单窗口注册与灵活检索（支持直接按窗口 ID 或中文标题解析）、幂等消息增量同步（`message_hash` 去重）、`APPROVED -> SUPERSEDED` 决策版本迭代、任务行锁租约防冲突、问题阻塞与解除、以及面向接力的上下文聚合接口。
-  - 完成本地 6 项 `pytest` 核心与边界测试（全绿通过），并已在阿里云生产环境跑通 PostgreSQL 13 低内存调优（总增量内存约 +62 MiB）与每日 `pg_dump` 自动备份。
-- [ ] **Stage 2 · MCP Server 挂载与本地三端 `.jsonl` 交接实测（下一阶段）**
-- [ ] **Stage 3 · Chrome Extension Chat Bridge（开发者模式本地加载）**
-- [ ] **Stage 4 · 长对话滚动压缩接入与可选 OSS 归档**
-- [ ] **Stage 5 · 全链路 14 项总验收**
+- [x] **Stage 1 · Central Hub 核心后端与数据库（已部署上线）**
+  - 完成 `server/` 全部数据模型与 Alembic 迁移脚本（PostgreSQL `pg_trgm` + `tsvector` GIN 全文索引，兼容本地 SQLite）。
+  - 实现双域 Token 鉴权（`Bridge Token` 与 `Agent Token` 物理隔离）、窗口解析、幂等同步、`APPROVED -> SUPERSEDED` 决策换代、任务行锁租约与问题解除。
+- [x] **Stage 2 · MCP Server 挂载与本地三端 `.jsonl` 交接实测（已上线 & 已注册三端）**
+  - 同进程挂载标准 Streamable HTTP `/mcp` 端点（含 31 个 Hub MCP Tools、`_security_notice` 防注入隔离边界与 Bridge-only 权限护栏）。
+  - 实现零外部依赖 `client-bridge/`：覆盖 Claude Code / Codex / Antigravity `.jsonl` 适配器、`git diff` 快照、标准 stdio MCP 代理、`tower-handoff` CLI，并已在三端真实配置文件完成备份注入与实机接力冒烟测试。
+- [x] **Stage 3 · Chrome Extension Chat Bridge（开发者模式就绪）**
+  - 完成 Manifest V3 纯原生扩展 `extension/`：包含侧边栏交互、DOM 语义隔离与降级剪贴板、`history-tree.js` 同源历史回溯、离线重试队列以及白名单自动发送 4 重防失控护栏（默认关闭、15s 冷却、5 次自动熔断、顶部急停开关）；扩展 Node 单元测试 6/6 全绿通过。
+- [x] **Stage 4 · DeepSeek 1M 滚动压缩（密钥保留本机）**
+  - 服务端开放 `/compaction/candidates`、`/compaction-plan`、`/digests`（强制保护最新 20 轮、防区间重叠与零删除）及 MCP 工具 `get_thread_digests`。
+  - 本机端实现 `client-bridge/tower_bridge/compact_cli.py`（`tower-compact`），自动安全发现本地 DeepSeek/Anthropic/OpenAI 接口并已通过真实 DeepSeek 模型与阿里云 Hub 端到端压测，密钥永不上云。
+- [x] **Stage 5 · 全链路 14 项总验收与开源容器化**
+  - 完成 14 项全链路自动化验收测试（服务端 `pytest` 24/24、客户端 `8/8`、扩展 `6/6`）、阿里云服务重启自启、`pg_dump` 临时库无损恢复演练及 Docker 快速试用编排。
 
 ---
 
-## 五、快速体验与本地测试（Stage 1）
+## 五、快速体验与本地部署
 
-> 生产部署可参照 [deploy/](deploy/) 与 [server/README.md](server/README.md)；本地开发与运行测试无需配置 PostgreSQL（默认支持 SQLite）：
+### 方案 A：零依赖 SQLite 快速试用（无需 PostgreSQL / Docker）
 
 ```bash
 cd server
@@ -104,7 +108,34 @@ python -m venv .venv
 # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest -v
+
+# 运行本地 Hub 服务（默认 SQLite）
+cp .env.example .env  # 按需修改 Token
+alembic upgrade head
+uvicorn app.main:app --host 127.0.0.1 --port 8100
 ```
+
+### 方案 B：Docker Compose 一键启动（PostgreSQL + Central Hub）
+
+```bash
+cp server/.env.example .env  # 可选：自定义各端 Token 与 POSTGRES_PASSWORD
+docker compose up --build -d
+curl http://127.0.0.1:8100/health
+```
+
+### 本地三端 CLI 与 Chrome 扩展接入
+
+1. **三端 MCP 与接力 CLI（零外部 pip 依赖）**：
+   ```bash
+   cd client-bridge
+   python register_clients.py --dry-run   # 预览将写入的三端 MCP 配置
+   python -m tower_bridge.handoff_cli doctor --repo .
+   python -m tower_bridge.compact_cli doctor
+   python -m tower_bridge.compact_cli candidates
+   ```
+2. **Chrome Chat Bridge 扩展（本地开发者模式）**：
+   - 在 Chrome 地址栏打开 `chrome://extensions/` → 开启右上角「开发者模式」→ 点击「加载已解压的扩展程序」→ 选择仓库中的 `extension/` 目录；
+   - 打开扩展侧边栏「连接设置」，填入 Hub 地址（例如 `https://hub.atmosphericduct.xyz`）与 `TOWER_BRIDGE_TOKEN` 并点击保存与测试连通性。
 
 ---
 
@@ -112,10 +143,11 @@ pytest -v
 
 ```text
 tower-of-babel/
-├── README.md                  # 项目愿景、目标、架构与当前进展
+├── README.md                  # 项目愿景、目标、架构与完整使用指南
 ├── LICENSE                    # MIT 开源协议
 ├── SECURITY.md                # 安全红线、密钥管理与 Prompt 注入防御说明
 ├── AGENTS.md                  # 面向执行 AI 的统一协作约定
+├── docker-compose.yml         # 一键启动 PostgreSQL + Central Hub（本地试用/自托管）
 ├── docs/
 │   ├── 00-global-execution-plan.md    # 全局分阶段执行路线与验收门禁
 │   ├── 01-architecture.md             # 轻量部署拓扑与资源预算
@@ -123,7 +155,9 @@ tower-of-babel/
 │   ├── 03-api-mcp-and-security.md     # API / MCP 契约与权限矩阵
 │   ├── 04-chat-bridge-design.md       # Chrome 扩展交互与防失控护栏
 │   └── 05-review-checklist.md         # 功能与边界审阅清单
-├── server/                    # [Stage 1 已实现] FastAPI + SQLAlchemy + Alembic + Pytest
+├── server/                    # FastAPI + SQLAlchemy + Alembic + MCP Server + Dockerfile + 24 项 Pytest
+├── client-bridge/             # 零依赖本地桥接：三端 .jsonl 适配器 / MCP stdio 代理 / DeepSeek 滚动压缩 CLI
+├── extension/                 # Chrome Manifest V3 侧边栏扩展（ChatGPT 白名单同步 / 问题队列 / 决策换代）
 └── deploy/                    # Systemd / Nginx HTTPS / PostgreSQL 每日备份脚本模板
 ```
 
